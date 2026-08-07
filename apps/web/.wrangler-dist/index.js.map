@@ -1,0 +1,8 @@
+{
+  "version": 3,
+  "sources": ["../worker/index.js"],
+  "sourceRoot": ".wrangler-dist",
+  "sourcesContent": ["function javascriptConfig(env) {\n  const config = JSON.stringify({\n    appDisplayName: env.APP_DISPLAY_NAME || \"DefterX\",\n    environment: env.APP_ENV || \"production\",\n    apiBaseUrl: env.API_BASE_URL || \"\"\n  }).replaceAll(\"<\", \"\\\\u003c\");\n\n  return `globalThis.__DEFTERX_CONFIG__ = ${config};`;\n}\n\nexport default {\n  async fetch(request, env) {\n    const url = new URL(request.url);\n\n    if (url.pathname === \"/health\") {\n      return Response.json({ status: \"ok\", service: \"defterx-web\", environment: env.APP_ENV || \"production\" });\n    }\n\n    if (url.pathname === \"/config.js\") {\n      return new Response(javascriptConfig(env), {\n        headers: {\n          \"content-type\": \"text/javascript; charset=utf-8\",\n          \"cache-control\": \"no-store\",\n          \"x-content-type-options\": \"nosniff\"\n        }\n      });\n    }\n\n    return env.ASSETS.fetch(request);\n  }\n};\n"],
+  "mappings": ";;;;AAAA,SAAS,iBAAiB,KAAK;AAC7B,QAAM,SAAS,KAAK,UAAU;AAAA,IAC5B,gBAAgB,IAAI,oBAAoB;AAAA,IACxC,aAAa,IAAI,WAAW;AAAA,IAC5B,YAAY,IAAI,gBAAgB;AAAA,EAClC,CAAC,EAAE,WAAW,KAAK,SAAS;AAE5B,SAAO,mCAAmC,MAAM;AAClD;AARS;AAUT,IAAO,gBAAQ;AAAA,EACb,MAAM,MAAM,SAAS,KAAK;AACxB,UAAM,MAAM,IAAI,IAAI,QAAQ,GAAG;AAE/B,QAAI,IAAI,aAAa,WAAW;AAC9B,aAAO,SAAS,KAAK,EAAE,QAAQ,MAAM,SAAS,eAAe,aAAa,IAAI,WAAW,aAAa,CAAC;AAAA,IACzG;AAEA,QAAI,IAAI,aAAa,cAAc;AACjC,aAAO,IAAI,SAAS,iBAAiB,GAAG,GAAG;AAAA,QACzC,SAAS;AAAA,UACP,gBAAgB;AAAA,UAChB,iBAAiB;AAAA,UACjB,0BAA0B;AAAA,QAC5B;AAAA,MACF,CAAC;AAAA,IACH;AAEA,WAAO,IAAI,OAAO,MAAM,OAAO;AAAA,EACjC;AACF;",
+  "names": []
+}

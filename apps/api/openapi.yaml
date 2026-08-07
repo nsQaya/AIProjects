@@ -1,0 +1,30 @@
+openapi: 3.1.0
+info:
+  title: DefterX API
+  version: 1.0.0
+  description: Offline-first finance API; monetary JSON properties are decimal strings.
+servers:
+  - url: /api/v1
+paths:
+  /auth/register: { post: { summary: Register, responses: { '201': { description: Created } } } }
+  /auth/login: { post: { summary: Login, responses: { '200': { description: Tokens } } } }
+  /auth/refresh: { post: { summary: Rotate refresh token, responses: { '200': { description: Tokens } } } }
+  /me: { get: { summary: Current user, responses: { '200': { description: User } } } }
+  /books: { get: { summary: List books, responses: { '200': { description: Books } } }, post: { summary: Create book, responses: { '201': { description: Created } } } }
+  /books/{bookId}/members: { get: { summary: List members, responses: { '200': { description: Members } } }, post: { summary: Add member, responses: { '201': { description: Added } } } }
+  /accounts: { get: { summary: List accounts, responses: { '200': { description: Accounts } } }, post: { summary: Create account, responses: { '201': { description: Created } } } }
+  /categories: { get: { summary: List categories, responses: { '200': { description: Categories } } }, post: { summary: Create category, responses: { '201': { description: Created } } } }
+  /contacts: { get: { summary: List contacts, responses: { '200': { description: Contacts } } }, post: { summary: Create contact, responses: { '201': { description: Created } } } }
+  /transactions: { get: { summary: List transactions, responses: { '200': { description: Transactions } } }, post: { summary: Post transaction, responses: { '201': { description: Posted } } } }
+  /transactions/{transactionId}/reverse: { post: { summary: Reverse transaction, responses: { '201': { description: Reversed } } } }
+  /scheduled-transactions: { get: { summary: Upcoming, responses: { '200': { description: Items } } }, post: { summary: Create one-time or recurring items, responses: { '201': { description: Created } } } }
+  /scheduled-transactions/{scheduledId}/realize: { post: { summary: Post and complete a scheduled item, responses: { '200': { description: Realized } } } }
+  /recurring-transactions: { get: { summary: List, responses: { '200': { description: Items } } }, post: { summary: Create, responses: { '201': { description: Created } } } }
+  /reports/dashboard: { get: { summary: Dashboard, responses: { '200': { description: Aggregates } } } }
+  /reports/cash-flow: { get: { summary: Cash flow by selected granularity, responses: { '200': { description: Periods } } } }
+  /reports/income-expense: { get: { summary: Income/expense, responses: { '200': { description: Report } } } }
+  /reports/balances: { get: { summary: Balances, responses: { '200': { description: Report } } } }
+  /reports/receivables-payables: { get: { summary: Receivables/payables, responses: { '200': { description: Report } } } }
+  /sync/push: { post: { summary: Push operations, responses: { '200': { description: Results } } } }
+  /sync/pull: { get: { summary: Pull changes, responses: { '200': { description: Changes } } } }
+  /investments/sales: { get: { summary: Investment sales, responses: { '200': { description: Sales } } }, post: { summary: Sell units and post proceeds, responses: { '201': { description: Sold } } } }

@@ -1,0 +1,2 @@
+import{describe,expect,it}from'vitest';import{signAccessToken,verifyAccessToken}from'../../src/common/crypto';
+describe('authentication crypto',()=>{it('signs expiring access tokens',async()=>{const token=await signAccessToken({id:'user-id',email:'a@example.com'},'a-secret-that-is-long-enough-for-tests',60);expect((await verifyAccessToken(token,'a-secret-that-is-long-enough-for-tests')).sub).toBe('user-id');await expect(verifyAccessToken(token,'another-secret-that-is-long-enough')).rejects.toThrow();});});

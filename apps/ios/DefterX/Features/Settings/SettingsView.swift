@@ -1,0 +1,2 @@
+import SwiftUI
+struct SettingsView:View{@EnvironmentObject var session:SessionStore;var body:some View{Form{Section("Defter"){NavigationLink("Müşteri / Tedarikçi"){ContactsView()};NavigationLink("Kategoriler"){CategoriesView()}}Section("Güvenlik"){Label("Face ID / Touch ID kilidi",systemImage:"faceid")}Section{Button("Çıkış Yap",role:.destructive){Task{await session.logout()}}}}.navigationTitle("Ayarlar")}

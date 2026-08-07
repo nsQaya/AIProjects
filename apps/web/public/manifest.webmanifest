@@ -1,0 +1,9 @@
+{
+  "name": "DefterX",
+  "short_name": "DefterX",
+  "start_url": "/#/dashboard",
+  "display": "standalone",
+  "background_color": "#f4f6f3",
+  "theme_color": "#17231f",
+  "icons": []
+}

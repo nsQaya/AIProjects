@@ -1,0 +1,167 @@
+import { Hono } from "hono";
+import type { AppEnv } from "../../config/bindings";
+import { AppError } from "../../common/errors";
+import { requireBookRole } from "../../middleware/book-access";
+
+export const reportRoutes = new Hono<AppEnv>();
+
+async function context(c: any) {
+  const pool = c.get("database");
+  const bookId = c.req.query("bookId") ?? "";
+  await requireBookRole(pool,bookId,c.get("user").id,"VIEWER");
+  const now = new Date();
+  return {
+    pool,bookId,
+    from:c.req.query("from") ?? new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),1)).toISOString(),
+    to:c.req.query("to") ?? now.toISOString(),
+  };
+}
+
+const incomeExpenseSql = `
+  SELECT
+    COALESCE(SUM(CASE WHEN a.account_type='SYSTEM_INCOME' AND e.direction='CREDIT' THEN e.base_amount
+                      WHEN a.account_type='SYSTEM_INCOME' THEN -e.base_amount ELSE 0 END),0)::text AS income,
+    COALESCE(SUM(CASE WHEN a.account_type='SYSTEM_EXPENSE' AND e.direction='DEBIT' THEN e.base_amount
+                      WHEN a.account_type='SYSTEM_EXPENSE' THEN -e.base_amount ELSE 0 END),0)::text AS expense
+  FROM transaction_entries e
+  JOIN accounts a ON a.id=e.account_id
+  JOIN transactions t ON t.id=e.transaction_id
+  WHERE t.book_id=$1 AND t.status IN ('POSTED','REVERSED') AND t.transaction_date BETWEEN $2 AND $3`;
+
+reportRoutes.get("/dashboard",async (c) => {
+  const {pool,bookId,from,to} = await context(c);
+  const [summary,accounts,recent,upcoming] = await Promise.all([
+    pool.query(incomeExpenseSql,[bookId,from,to]),
+    pool.query(
+      `SELECT a.id,a.name,a.account_type AS "accountType",a.currency_code AS "currencyCode",
+              a.credit_limit::text AS "creditLimit",
+              (CASE WHEN a.normal_balance='DEBIT'
+                THEN COALESCE(SUM(CASE WHEN t.id IS NULL THEN 0 WHEN e.direction='DEBIT' THEN e.base_amount ELSE -e.base_amount END),0)
+                ELSE -COALESCE(SUM(CASE WHEN t.id IS NULL THEN 0 WHEN e.direction='CREDIT' THEN e.base_amount ELSE -e.base_amount END),0)
+              END)::text AS balance
+       FROM accounts a
+       LEFT JOIN transaction_entries e ON e.account_id=a.id
+       LEFT JOIN transactions t ON t.id=e.transaction_id AND t.status IN ('POSTED','REVERSED')
+       WHERE a.book_id=$1 AND a.is_system=false AND a.deleted_at IS NULL AND a.is_archived=false
+       GROUP BY a.id ORDER BY a.sort_order,a.name LIMIT 8`,
+      [bookId],
+    ),
+    pool.query(
+      `SELECT t.id,t.transaction_type AS type,t.title,t.transaction_date AS "transactionDate",
+              t.currency_code AS "currencyCode",e.amount::text AS amount
+       FROM transactions t
+       LEFT JOIN LATERAL (SELECT amount FROM transaction_entries WHERE transaction_id=t.id LIMIT 1) e ON true
+       WHERE t.book_id=$1 AND t.deleted_at IS NULL AND t.status='POSTED' AND t.transaction_type<>'REVERSAL'
+       ORDER BY t.transaction_date DESC,t.transaction_no DESC LIMIT 10`,
+      [bookId],
+    ),
+    pool.query(
+      `SELECT id,title,amount::text,currency_code AS "currencyCode",scheduled_at AS "scheduledAt",transaction_type AS type
+       FROM scheduled_transactions
+       WHERE book_id=$1 AND status IN ('PENDING','OVERDUE') AND deleted_at IS NULL
+       ORDER BY scheduled_at LIMIT 10`,
+      [bookId],
+    ),
+  ]);
+  return c.json({month:summary.rows[0],importantAccounts:accounts.rows,recentTransactions:recent.rows,upcoming:upcoming.rows});
+});
+
+reportRoutes.get("/cash-flow",async (c) => {
+  const {pool,bookId,from,to} = await context(c);
+  const requested=c.req.query("granularity")??"month";
+  const granularity=["day","week","month","year"].includes(requested)?requested:"month";
+  const rawAccountIds=c.req.query("accountIds");
+  const includeAllAccounts=rawAccountIds===undefined||rawAccountIds==="all";
+  const accountIds=includeAllAccounts||rawAccountIds==="none"
+    ?[]
+    :rawAccountIds.split(",").filter(Boolean);
+  const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if(accountIds.length>200||accountIds.some((id)=>!uuid.test(id))){
+    throw new AppError(422,"INVALID_ACCOUNT_FILTER","Account filter contains an invalid identifier");
+  }
+  const intervals:Record<string,string>={day:"1 day",week:"1 week",month:"1 month",year:"1 year"};
+  const formats:Record<string,string>={day:"YYYY-MM-DD",week:"YYYY-MM-DD",month:"YYYY-MM",year:"YYYY"};
+  const interval=intervals[granularity]!;
+  const format=formats[granularity]!;
+  const result = await pool.query(
+    `WITH periods AS (
+       SELECT generate_series(date_trunc($4,$2::timestamptz),date_trunc($4,$3::timestamptz),$5::interval) AS bucket
+     ), totals AS (
+       SELECT date_trunc($4,t.transaction_date) AS bucket,
+         SUM(CASE WHEN a.account_type='SYSTEM_INCOME' AND e.direction='CREDIT' THEN e.base_amount
+                  WHEN a.account_type='SYSTEM_INCOME' THEN -e.base_amount ELSE 0 END) income,
+         SUM(CASE WHEN a.account_type='SYSTEM_EXPENSE' AND e.direction='DEBIT' THEN e.base_amount
+                  WHEN a.account_type='SYSTEM_EXPENSE' THEN -e.base_amount ELSE 0 END) expense
+       FROM transaction_entries e JOIN accounts a ON a.id=e.account_id JOIN transactions t ON t.id=e.transaction_id
+       WHERE t.book_id=$1 AND t.status IN ('POSTED','REVERSED') AND t.transaction_date BETWEEN $2 AND $3
+       GROUP BY 1
+     )
+     SELECT to_char(p.bucket,$6) AS period,to_char(p.bucket,'YYYY-MM') AS month,
+            p.bucket AS "periodStart",COALESCE(t.income,0)::text income,
+            COALESCE(t.expense,0)::text expense,(COALESCE(t.income,0)-COALESCE(t.expense,0))::text net,
+            COALESCE(b.balance,0)::text balance
+     FROM periods p
+     LEFT JOIN totals t ON t.bucket=p.bucket
+     LEFT JOIN LATERAL (
+       SELECT COALESCE(SUM(CASE WHEN e.direction='DEBIT' THEN e.base_amount ELSE -e.base_amount END),0) AS balance
+       FROM transaction_entries e
+       JOIN transactions bt ON bt.id=e.transaction_id AND bt.status IN ('POSTED','REVERSED')
+       JOIN accounts ba ON ba.id=e.account_id
+       WHERE bt.book_id=$1 AND ba.is_system=false AND ba.deleted_at IS NULL
+         AND bt.transaction_date < p.bucket+$5::interval AND bt.transaction_date <= $3::timestamptz
+         AND ($8::boolean OR ba.id=ANY($7::uuid[]))
+     ) b ON true
+     ORDER BY p.bucket`,
+    [bookId,from,to,granularity,interval,format,accountIds,includeAllAccounts],
+  );
+  return c.json({items:result.rows,granularity,from,to});
+});
+
+reportRoutes.get("/income-expense",async (c) => {
+  const {pool,bookId,from,to} = await context(c);
+  const result = await pool.query(
+    `SELECT c.id,c.name,c.category_type AS type,c.is_active AS "isActive",
+            COALESCE(SUM(CASE WHEN c.category_type='INCOME' AND e.direction='CREDIT' THEN e.base_amount
+                              WHEN c.category_type='EXPENSE' AND e.direction='DEBIT' THEN e.base_amount ELSE -e.base_amount END),0)::text amount
+     FROM categories c JOIN transaction_entries e ON e.account_id=c.system_account_id
+     JOIN transactions t ON t.id=e.transaction_id
+     WHERE c.book_id=$1 AND t.status IN ('POSTED','REVERSED') AND t.transaction_date BETWEEN $2 AND $3
+     GROUP BY c.id ORDER BY c.category_type,c.name`,
+    [bookId,from,to],
+  );
+  return c.json({items:result.rows});
+});
+
+reportRoutes.get("/balances",async (c) => {
+  const {pool,bookId} = await context(c);
+  const result = await pool.query(
+    `SELECT a.id,a.name,a.account_type AS "accountType",a.currency_code AS "currencyCode",
+            (CASE WHEN a.normal_balance='DEBIT'
+              THEN COALESCE(SUM(CASE WHEN t.id IS NULL THEN 0 WHEN e.direction='DEBIT' THEN e.base_amount ELSE -e.base_amount END),0)
+              ELSE -COALESCE(SUM(CASE WHEN t.id IS NULL THEN 0 WHEN e.direction='CREDIT' THEN e.base_amount ELSE -e.base_amount END),0)
+            END)::text balance
+     FROM accounts a LEFT JOIN transaction_entries e ON e.account_id=a.id
+     LEFT JOIN transactions t ON t.id=e.transaction_id AND t.status IN ('POSTED','REVERSED')
+     WHERE a.book_id=$1 AND a.is_system=false AND a.deleted_at IS NULL
+     GROUP BY a.id ORDER BY a.name`,
+    [bookId],
+  );
+  return c.json({items:result.rows});
+});
+
+reportRoutes.get("/receivables-payables",async (c) => {
+  const {pool,bookId} = await context(c);
+  const result = await pool.query(
+    `SELECT c.id,c.name,c.contact_type AS "contactType",a.currency_code AS "currencyCode",
+            (CASE WHEN a.normal_balance='DEBIT'
+              THEN COALESCE(SUM(CASE WHEN t.id IS NULL THEN 0 WHEN e.direction='DEBIT' THEN e.base_amount ELSE -e.base_amount END),0)
+              ELSE COALESCE(SUM(CASE WHEN t.id IS NULL THEN 0 WHEN e.direction='CREDIT' THEN e.base_amount ELSE -e.base_amount END),0)
+            END)::text balance
+     FROM contacts c JOIN accounts a ON a.contact_id=c.id
+     LEFT JOIN transaction_entries e ON e.account_id=a.id
+     LEFT JOIN transactions t ON t.id=e.transaction_id AND t.status IN ('POSTED','REVERSED')
+     WHERE c.book_id=$1 AND c.deleted_at IS NULL GROUP BY c.id,a.id ORDER BY c.name`,
+    [bookId],
+  );
+  return c.json({items:result.rows});
+});

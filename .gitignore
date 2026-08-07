@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.wrangler/
+.dev.vars
+*.xcuserstate
+.build/
+DerivedData/
+.DS_Store
+coverage/
+

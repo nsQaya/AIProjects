@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "defterx-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-08-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "APP_DISPLAY_NAME": "DefterX",
+    "ALLOWED_ORIGINS": "https://defterx-web.agentproje1.workers.dev,http://localhost:3000,http://127.0.0.1:3000,http://127.0.0.1:3001",
+    "ACCESS_TOKEN_TTL_SECONDS": "900",
+    "REFRESH_TOKEN_TTL_SECONDS": "2592000"
+  },
+  "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "d522f89c9de342c5b055d0bd366e6f25" }],
+  "ratelimits": [{ "name": "RATE_LIMITER", "namespace_id": "1001", "simple": { "limit": 10, "period": 60 } }],
+  "queues": {
+    "producers": [{ "binding": "JOBS", "queue": "defterx-jobs" }],
+    "consumers": [{ "queue": "defterx-jobs", "max_batch_size": 10, "max_batch_timeout": 5, "max_retries": 3 }]
+  },
+  "triggers": { "crons": ["*/15 * * * *"] },
+  "placement": { "mode": "smart" },
+  "observability": { "enabled": true, "head_sampling_rate": 0.1 }
+}

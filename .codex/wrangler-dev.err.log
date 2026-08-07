@@ -1,0 +1,34 @@
+[31mX [41;31m[[41;97mERROR[41;31m][0m [1mFailed to write to log file Error: EPERM: operation not permitted, open 'C:\Users\nihat.kaya\AppData\Roaming\xdg.config\.wrangler\logs\wrangler-2026-08-07_06-35-18_132.log'[0m
+
+      at async open (node:internal/fs/promises:697:25)
+      at async writeFile (node:internal/fs/promises:1317:14)
+      at async C:\AIProjects\node_modules\wrangler\wrangler-dist\cli.js:60371:7
+      at async Mutex.runWith (C:\AIProjects\node_modules\miniflare\dist\src\index.js:82805:48)
+      at async appendToDebugLogFile (C:\AIProjects\node_modules\wrangler\wrangler-dist\cli.js:60368:3) {
+    errno: -4048,
+    code: 'EPERM',
+    syscall: 'open',
+    path: 'C:\\Users\\nihat.kaya\\AppData\\Roaming\\xdg.config\\.wrangler\\logs\\wrangler-2026-08-07_06-35-18_132.log'
+  }
+
+
+[31mX [41;31m[[41;97mERROR[41;31m][0m [1mWould have written: [0m
+
+  --- 2026-08-07T06:35:18.496Z debug
+  🪵  Writing logs to "C:\Users\nihat.kaya\AppData\Roaming\xdg.config\.wrangler\logs\wrangler-2026-08-07_06-35-18_132.log"
+  ---
+  
+
+
+[31mX [41;31m[[41;97mERROR[41;31m][0m [1mWhen developing locally, you should use a local Postgres connection string to emulate Hyperdrive functionality. Please setup Postgres locally and set the value of the 'CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE' variable or "HYPERDRIVE"'s "localConnectionString" to the Postgres connection string.[0m
+
+
+🪵  Logs were written to "C:\Users\nihat.kaya\AppData\Roaming\xdg.config\.wrangler\logs\wrangler-2026-08-07_06-35-18_132.log"
+Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), file src\win\async.c, line 94
+npm error Lifecycle script `dev` failed with error:
+npm error code 3221226505
+npm error path C:\AIProjects\apps\api
+npm error workspace @defterx/api@0.1.0
+npm error location C:\AIProjects\apps\api
+npm error command failed
+npm error command C:\WINDOWS\system32\cmd.exe /d /s /c wrangler dev --ip 127.0.0.1 --port 8787

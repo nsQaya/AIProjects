@@ -1,0 +1,6 @@
+import SwiftUI
+struct BookCreateView:View{@EnvironmentObject var session:SessionStore;@Environment(\.dismiss)var dismiss;@State private var name="";@State private var type=BookType.personal;@State private var currency="TRY";@State private var error:String?
+ var body:some View{NavigationStack{Form{TextField("Defter adı",text:$name);Picker("Tür",selection:$type){ForEach(BookType.allCases,id:\.self){Text(label($0)).tag($0)}};TextField("Para birimi",text:$currency).textInputAutocapitalization(.characters);if let error{Text(error).foregroundStyle(.red)}}.navigationTitle("Yeni Defter").toolbar{ToolbarItem(placement:.cancellationAction){Button("Vazgeç"){dismiss()}};ToolbarItem(placement:.confirmationAction){Button("Oluştur"){Task{await save()}}.disabled(name.isEmpty)}}}}
+ func save()async{do{let _:ResourceIdentifier=try await session.container.api.send("POST","books",body:CreateBookRequest(name:name,bookType:type,baseCurrency:currency.uppercased()));try await session.loadBooks();session.selectedBook=session.books.last;dismiss()}catch{self.error=error.localizedDescription}}
+ func label(_ value:BookType)->String{switch value{case.personal:"Kişisel";case.business:"İşletme";case.other:"Diğer"}}
+}

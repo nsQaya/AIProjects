@@ -1,0 +1,4 @@
+JWT_SECRET=replace-with-at-least-32-random-characters
+REFRESH_TOKEN_PEPPER=replace-with-a-different-random-secret
+# Local Wrangler Hyperdrive binding supplies HYPERDRIVE.connectionString.
+

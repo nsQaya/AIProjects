@@ -1,0 +1,21 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "defterx-web",
+  "main": "worker/index.js",
+  "compatibility_date": "2025-08-01",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/health", "/config.js"]
+  },
+  "vars": {
+    "APP_DISPLAY_NAME": "DefterX",
+    "APP_ENV": "production",
+    "API_BASE_URL": "https://defterx-api.agentproje1.workers.dev"
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 0.1
+  }
+}

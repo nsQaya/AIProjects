@@ -1,0 +1,20 @@
+{
+  "name": "defterx",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": ["apps/api", "apps/web", "packages/*"],
+  "scripts": {
+    "build": "npm run build --workspace @defterx/contracts && npm run build --workspace @defterx/shared && npm run build --workspace @defterx/api && npm run build --workspace @defterx/web",
+    "check": "npm run typecheck --workspaces --if-present && npm run check --workspace @defterx/web",
+    "test": "npm run test --workspace @defterx/api",
+    "test:unit": "npm run test:unit --workspace @defterx/api",
+    "test:integration": "npm run test:integration --workspace @defterx/api",
+    "dev": "npm run dev --workspace @defterx/api",
+    "web:dev": "npm run dev --workspace @defterx/web",
+    "deploy": "npm run deploy:api",
+    "deploy:api": "npm run deploy --workspace @defterx/api",
+    "deploy:web": "npm run deploy --workspace @defterx/web",
+    "db:migrate": "npm run db:migrate --workspace @defterx/database"
+  },
+  "engines": { "node": ">=22" }
+}
