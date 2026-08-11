@@ -38,6 +38,7 @@ components:
         accountId: { type: string, format: uuid }
         targetAccountId: { type: string, format: uuid }
         categoryId: { type: string, format: uuid }
+        costCenterId: { type: [string, 'null'], format: uuid }
         contactId: { type: string, format: uuid }
         transactionDate: { type: string, format: date-time }
         dueDate: { type: string, format: date-time }
@@ -64,11 +65,17 @@ paths:
   /categories:
     get: { summary: List categories, responses: { '200': { description: Categories } } }
     post: { summary: Create category and hidden ledger account, responses: { '201': { description: Created } } }
+  /cost-centers:
+    get: { summary: List active or all cost centers for a book, responses: { '200': { description: Cost centers } } }
+    post: { summary: Create cost center, responses: { '201': { description: Created } } }
+  /cost-centers/{costCenterId}:
+    patch: { summary: Update or reactivate cost center, responses: { '200': { description: Updated } } }
+    delete: { summary: Hard-delete unused or deactivate used cost center, responses: { '200': { description: Deleted or deactivated } } }
   /contacts:
     get: { summary: List contacts, responses: { '200': { description: Contacts } } }
     post: { summary: Create contact and ledger account, responses: { '201': { description: Created } } }
   /transactions:
-    get: { summary: List transactions, responses: { '200': { description: Transactions } } }
+    get: { summary: List transactions with optional costCenterId filter, responses: { '200': { description: Transactions } } }
     post:
       summary: Post balanced transaction
       parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
@@ -89,7 +96,7 @@ paths:
   /reports/cash-flow:
     get: { summary: Cash flow grouped by day, week, month or year, responses: { '200': { description: Cash flow periods } } }
   /reports/income-expense:
-    get: { summary: Income and expense by category, responses: { '200': { description: Report } } }
+    get: { summary: Income and expense by category with signed cost-center breakdown, responses: { '200': { description: Report } } }
   /reports/balances:
     get: { summary: Reconstructed account balances, responses: { '200': { description: Balances } } }
   /reports/receivables-payables:

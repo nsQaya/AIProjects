@@ -10,6 +10,7 @@ import { userRoutes } from "./modules/users/user.routes";
 import { bookRoutes } from "./modules/books/book.routes";
 import { accountRoutes } from "./modules/accounts/account.routes";
 import { categoryRoutes } from "./modules/categories/category.routes";
+import { costCenterRoutes } from "./modules/cost-centers/cost-center.routes";
 import { contactRoutes } from "./modules/contacts/contact.routes";
 import { transactionRoutes } from "./modules/transactions/transaction.routes";
 import { scheduledRoutes } from "./modules/scheduled-transactions/scheduled.routes";
@@ -39,17 +40,19 @@ app.get("/health/ready", async (c) => {
     }>(`SELECT
       (SELECT COUNT(*)::int FROM schema_migrations) AS migration_count,
       to_regclass('public.users') IS NOT NULL AND to_regclass('public.transactions') IS NOT NULL
+        AND to_regclass('public.cost_centers') IS NOT NULL
         AND to_regclass('public.investment_lots') IS NOT NULL AS schema_ready,
       has_table_privilege(current_user,'public.users','SELECT,INSERT')
         AND has_table_privilege(current_user,'public.transactions','SELECT,INSERT,UPDATE,DELETE')
+        AND has_table_privilege(current_user,'public.cost_centers','SELECT,INSERT,UPDATE,DELETE')
         AND has_table_privilege(current_user,'public.investment_lots','SELECT,INSERT,UPDATE,DELETE') AS tables_ready,
       has_sequence_privilege(current_user,'public.transaction_number_seq','USAGE') AS sequence_ready`));
     const checks = result.rows[0]!;
-    const ready = checks.migration_count === 13 && checks.schema_ready && checks.tables_ready
+    const ready = checks.migration_count === 14 && checks.schema_ready && checks.tables_ready
       && checks.sequence_ready && secretBytes >= 32 && pepperBytes >= 32;
     return c.json({ status: ready ? "ready" : "not_ready", checks: {
       database: true,
-      migrations: checks.migration_count === 13,
+      migrations: checks.migration_count === 14,
       schema: checks.schema_ready,
       tablePrivileges: checks.tables_ready,
       sequencePrivileges: checks.sequence_ready,
@@ -70,6 +73,7 @@ app.route("/api/v1/me", userRoutes);
 app.route("/api/v1/books", bookRoutes);
 app.route("/api/v1/accounts", accountRoutes);
 app.route("/api/v1/categories", categoryRoutes);
+app.route("/api/v1/cost-centers", costCenterRoutes);
 app.route("/api/v1/contacts", contactRoutes);
 app.route("/api/v1/transactions", transactionRoutes);
 app.route("/api/v1/scheduled-transactions", scheduledRoutes);

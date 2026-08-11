@@ -22,6 +22,8 @@ transactionRoutes.get("/",async (c) => {
   const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   if(accountIds.length>200||accountIds.some(id=>!uuid.test(id)))throw new AppError(422,"INVALID_ACCOUNT_FILTER","Account filter contains an invalid identifier");
   const categoryId = c.req.query("categoryId") ?? null;
+  const costCenterId = c.req.query("costCenterId") ?? null;
+  if(costCenterId&&!uuid.test(costCenterId))throw new AppError(422,"INVALID_COST_CENTER_FILTER","Cost center filter contains an invalid identifier");
   const from = c.req.query("from") ?? null;
   const to = c.req.query("to") ?? null;
   const [result,opening]=await Promise.all([
@@ -44,7 +46,8 @@ transactionRoutes.get("/",async (c) => {
             t.target_account_id AS "targetAccountId",target.name AS "targetAccountName",
             t.title,t.description,t.transaction_date AS "transactionDate",t.due_date AS "dueDate",
             t.status,t.currency_code AS "currencyCode",t.category_id AS "categoryId",
-            category.name AS "categoryName",t.contact_id AS "contactId",t.version,
+            category.name AS "categoryName",t.cost_center_id AS "costCenterId",
+            cost_center.name AS "costCenterName",t.contact_id AS "contactId",t.version,
             ledger.delta::text AS "balanceDelta",ledger.running_balance::text AS "runningBalance",
             COALESCE((SELECT e.amount::text FROM transaction_entries e
               WHERE e.transaction_id=t.id AND e.account_id=t.account_id LIMIT 1),
@@ -54,13 +57,15 @@ transactionRoutes.get("/",async (c) => {
      LEFT JOIN accounts source ON source.id=t.account_id
      LEFT JOIN accounts target ON target.id=t.target_account_id
      LEFT JOIN categories category ON category.id=t.category_id
+     LEFT JOIN cost_centers cost_center ON cost_center.id=t.cost_center_id
      WHERE t.book_id=$1 AND t.deleted_at IS NULL AND t.status='POSTED' AND t.transaction_type<>'REVERSAL'
        AND ($3::timestamptz IS NULL OR (t.transaction_date,t.transaction_no)<($3::timestamptz,9223372036854775807))
        AND ($6::uuid IS NULL OR t.category_id=$6)
        AND ($7::timestamptz IS NULL OR t.transaction_date>=$7)
        AND ($8::timestamptz IS NULL OR t.transaction_date<=$8)
+       AND ($9::uuid IS NULL OR t.cost_center_id=$9)
      ORDER BY t.transaction_date DESC,t.transaction_no DESC LIMIT $2`,
-    [bookId,limit,cursor,accountIds,includeAllAccounts,categoryId,from,to],
+    [bookId,limit,cursor,accountIds,includeAllAccounts,categoryId,from,to,costCenterId],
     ),
     pool.query(
       `SELECT COALESCE(SUM(CASE WHEN e.direction='DEBIT' THEN e.base_amount ELSE -e.base_amount END),0)::text AS balance

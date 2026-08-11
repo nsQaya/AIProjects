@@ -1,6 +1,0 @@
-[31mX [41;31m[[41;97mERROR[41;31m][0m [1m*** std::terminate() called with no exception[0m
-
-
-[31mX [41;31m[[41;97mERROR[41;31m][0m [1mstack: 7ffa3e391249 7ff732f263a5 7ffa3e3abaff 7ffa3e393a9c 7ffa3e3aae8c 7ffa3e392ce1 7ffa3e3ab8f7 7ffa770c4b3e 7ffa76fa2102 7ffa3e3ab3d5 7ffa3e391c1f 7ffa3e392dd7 7ffa3e3ab8f7 7ffa770c4abe 7ffa76fa5e96 7ffa76fed010 7ffa745a1879 7ffa3e3955a8 7ff7345b045f 7ff732f25f63 7ff7345b5512 7ff7345bc416 7ff7345b5a6b 7ff7345bc416 7ff7345b2fbb 7ff732f11e77 7ff7363e219e 7ffa75b2ccb6 7ffa7700ad6b[0m
-
-

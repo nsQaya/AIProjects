@@ -4,13 +4,42 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node scripts/build.mjs && wrangler deploy --dry-run --outdir .wrangler-dist",
-    "check": "node scripts/check.mjs",
+    "build": "vite build && wrangler deploy --dry-run --outdir .wrangler-dist",
+    "build:app": "vite build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "npm run typecheck && npm run lint && npm run test",
     "smoke:live": "node scripts/smoke-live.mjs",
-    "dev": "node scripts/build.mjs && wrangler dev --config wrangler.jsonc --ip 127.0.0.1 --port 3000",
-    "deploy": "node scripts/build.mjs && wrangler deploy --config wrangler.jsonc"
+    "dev": "vite --host 127.0.0.1 --port 3000",
+    "preview": "vite preview --host 127.0.0.1 --port 4173",
+    "deploy": "vite build && wrangler deploy --config wrangler.jsonc"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@testing-library/jest-dom": "^7.0.0",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.0.5",
+    "eslint": "^10.8.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.3",
+    "globals": "^17.9.0",
+    "jsdom": "^30.0.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.66.0",
+    "vite": "^8.2.1",
+    "vitest": "^3.2.7",
     "wrangler": "^4.30.0"
+  },
+  "dependencies": {
+    "@defterx/contracts": "^0.1.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-router-dom": "^7.18.2",
+    "zod": "^4.4.3"
   }
 }

@@ -1,1 +1,0 @@
-This folder contains the built output assets for the worker "defterx-web" generated at 2026-08-07T13:55:40.099Z.

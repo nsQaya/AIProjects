@@ -6,7 +6,7 @@
   "scripts": {
     "build": "npm run build --workspace @defterx/contracts && npm run build --workspace @defterx/shared && npm run build --workspace @defterx/api && npm run build --workspace @defterx/web",
     "check": "npm run typecheck --workspaces --if-present && npm run check --workspace @defterx/web",
-    "test": "npm run test --workspace @defterx/api",
+    "test": "npm run test --workspace @defterx/api && npm run test --workspace @defterx/web",
     "test:unit": "npm run test:unit --workspace @defterx/api",
     "test:integration": "npm run test:integration --workspace @defterx/api",
     "dev": "npm run dev --workspace @defterx/api",

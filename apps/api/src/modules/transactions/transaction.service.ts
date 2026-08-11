@@ -2,20 +2,25 @@ import { sha256 } from "../../common/crypto";
 import { AppError } from "../../common/errors";
 import { inTransaction, type DbClient } from "../../infrastructure/database";
 import { assertBalancedEntries, mapTransactionToEntries } from "../ledger/ledger-mapper";
+import {
+  relinkScheduledAfterTransactionCorrection,
+  reopenScheduledAfterTransactionReversal,
+} from "../scheduled-transactions/scheduled-reversal.service";
 import { assertAccountPostingLimits, insertPostedTransaction, resolveLedgerAccounts } from "./transaction.repository";
 import type { TransactionMutationInput } from "./transaction.schemas";
 
-export async function createTransactionWithClient(client: DbClient, userId: string, input: TransactionMutationInput) {
+export async function createTransactionWithClient(client: DbClient, userId: string, input: TransactionMutationInput, options:{allowInactiveCostCenter?:boolean}={}) {
   const duplicate = await client.query(
     `SELECT id,book_id AS "bookId",transaction_no::text AS "transactionNo",
             transaction_type AS type,account_id AS "accountId",target_account_id AS "targetAccountId",
+            cost_center_id AS "costCenterId",
             title,status,currency_code AS "currencyCode",client_operation_id AS "clientOperationId",
             version,created_at AS "createdAt"
      FROM transactions WHERE book_id=$1 AND client_operation_id=$2`,
     [input.bookId,input.clientOperationId],
   );
   if (duplicate.rows[0]) return duplicate.rows[0];
-  const resolved = await resolveLedgerAccounts(client,input);
+  const resolved = await resolveLedgerAccounts(client,input,options);
   const entries = mapTransactionToEntries({...input,...resolved});
   assertBalancedEntries(entries);
   return insertPostedTransaction(client,userId,input,entries);
@@ -64,6 +69,7 @@ export async function reverseWithClient(
   clientOperationId: string,
   reason: string,
   enforceLimits = true,
+  scheduledPlanMode: "REOPEN" | "PRESERVE_FOR_CORRECTION" = "REOPEN",
 ) {
   const originalResult = await client.query<any>(
     `SELECT * FROM transactions WHERE id=$1 AND book_id=$2 AND deleted_at IS NULL FOR UPDATE`,
@@ -75,10 +81,15 @@ export async function reverseWithClient(
     const prior = await client.query(
       `SELECT id,book_id AS "bookId",transaction_type AS type,title,
               transaction_date AS "transactionDate",status,currency_code AS "currencyCode",
-              client_operation_id AS "clientOperationId",version
+              client_operation_id AS "clientOperationId",cost_center_id AS "costCenterId",version
        FROM transactions WHERE reverses_transaction_id=$1`,
       [transactionId],
     );
+    if (prior.rows[0] && scheduledPlanMode === "REOPEN") {
+      await reopenScheduledAfterTransactionReversal(
+        client,userId,bookId,transactionId,prior.rows[0].id,
+      );
+    }
     return prior.rows[0];
   }
   if (original.status !== "POSTED" || original.transaction_type === "REVERSAL") {
@@ -99,14 +110,14 @@ export async function reverseWithClient(
 
   const reversal = await client.query(
     `INSERT INTO transactions(
-       book_id,transaction_type,account_id,target_account_id,title,description,transaction_date,
+       book_id,transaction_type,account_id,target_account_id,cost_center_id,title,description,transaction_date,
        status,currency_code,client_operation_id,reverses_transaction_id,created_by
-     ) VALUES($1,'REVERSAL',$2,$3,$4,$5,now(),'POSTED',$6,$7,$8,$9)
+     ) VALUES($1,'REVERSAL',$2,$3,$4,$5,$6,now(),'POSTED',$7,$8,$9,$10)
      RETURNING id,book_id AS "bookId",transaction_no::text AS "transactionNo",transaction_type AS type,
-       account_id AS "accountId",target_account_id AS "targetAccountId",title,
+       account_id AS "accountId",target_account_id AS "targetAccountId",cost_center_id AS "costCenterId",title,
        transaction_date AS "transactionDate",status,currency_code AS "currencyCode",
        client_operation_id AS "clientOperationId",version,created_at AS "createdAt"`,
-    [bookId,original.account_id,original.target_account_id,`İptal: ${original.title}`,reason,original.currency_code,clientOperationId,transactionId,userId],
+    [bookId,original.account_id,original.target_account_id,original.cost_center_id,`İptal: ${original.title}`,reason,original.currency_code,clientOperationId,transactionId,userId],
   );
   const sourceEntry = await client.query<{account_id:string;amount:string}>(
     `SELECT account_id,amount::text FROM transaction_entries
@@ -125,15 +136,20 @@ export async function reverseWithClient(
   const originalPayload = {
     id:original.id,bookId:original.book_id,type:original.transaction_type,title:original.title,
     transactionDate:original.transaction_date,status:"REVERSED",currencyCode:original.currency_code,
-    clientOperationId:original.client_operation_id,categoryId:original.category_id,contactId:original.contact_id,
+    clientOperationId:original.client_operation_id,categoryId:original.category_id,costCenterId:original.cost_center_id,contactId:original.contact_id,
     version:original.version+1,...common,
   };
-  const reversalPayload = {...reversal.rows[0],categoryId:null,contactId:null,...common};
+  const reversalPayload = {...reversal.rows[0],categoryId:null,costCenterId:original.cost_center_id,contactId:null,...common};
   await client.query(
     `INSERT INTO audit_logs(book_id,actor_user_id,entity_type,entity_id,action,old_values,new_values)
      VALUES($1,$2,'TRANSACTION',$3,'REVERSE',$4,$5)`,
     [bookId,userId,transactionId,JSON.stringify({status:"POSTED"}),JSON.stringify({status:"REVERSED",reversalId:reversal.rows[0].id,reason})],
   );
+  if (scheduledPlanMode === "REOPEN") {
+    await reopenScheduledAfterTransactionReversal(
+      client,userId,bookId,transactionId,reversal.rows[0].id,
+    );
+  }
   await client.query(
     `INSERT INTO sync_changes(book_id,entity_type,entity_id,action,entity_version,payload)
      VALUES($1,'TRANSACTION',$2,'UPSERT',$3,$4),($1,'TRANSACTION',$5,'UPSERT',1,$6)`,
@@ -157,8 +173,20 @@ export async function correctTransaction(
 ) {
   if (replacement.bookId !== bookId) throw new AppError(422,"BOOK_MISMATCH","Replacement must belong to the same book");
   return inTransaction(pool,async (client) => {
-    const reversal = await reverseWithClient(client,userId,bookId,transactionId,reversalClientOperationId,reason,false);
-    const corrected = await createTransactionWithClient(client,userId,replacement);
+    const original = await client.query<{ cost_center_id: string | null }>(
+      `SELECT cost_center_id FROM transactions WHERE id=$1 AND book_id=$2 AND deleted_at IS NULL`,
+      [transactionId,bookId],
+    );
+    const reversal = await reverseWithClient(
+      client,userId,bookId,transactionId,reversalClientOperationId,reason,false,
+      "PRESERVE_FOR_CORRECTION",
+    );
+    const corrected = await createTransactionWithClient(client,userId,replacement,{
+      allowInactiveCostCenter:Boolean(replacement.costCenterId&&replacement.costCenterId===original.rows[0]?.cost_center_id),
+    });
+    await relinkScheduledAfterTransactionCorrection(
+      client,userId,bookId,transactionId,corrected.id,
+    );
     return {reversal,transaction:corrected};
   });
 }

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../../config/bindings";
 import { AppError } from "../../common/errors";
+import type { DbClient } from "../../infrastructure/database";
 import { requireBookRole } from "../../middleware/book-access";
 
 export const reportRoutes = new Hono<AppEnv>();
@@ -27,6 +28,42 @@ const incomeExpenseSql = `
   JOIN accounts a ON a.id=e.account_id
   JOIN transactions t ON t.id=e.transaction_id
   WHERE t.book_id=$1 AND t.status IN ('POSTED','REVERSED') AND t.transaction_date BETWEEN $2 AND $3`;
+
+export async function loadIncomeExpenseReport(
+  pool: DbClient,
+  bookId: string,
+  from: string,
+  to: string,
+) {
+  const [result,costCenters] = await Promise.all([pool.query(
+    `SELECT c.id,c.name,c.category_type AS type,c.is_active AS "isActive",
+            COALESCE(SUM(CASE WHEN c.category_type='INCOME' AND e.direction='CREDIT' THEN e.base_amount
+                              WHEN c.category_type='EXPENSE' AND e.direction='DEBIT' THEN e.base_amount ELSE -e.base_amount END),0)::text amount
+     FROM categories c JOIN transaction_entries e ON e.account_id=c.system_account_id
+     JOIN transactions t ON t.id=e.transaction_id
+     WHERE c.book_id=$1 AND t.status IN ('POSTED','REVERSED') AND t.transaction_date BETWEEN $2 AND $3
+     GROUP BY c.id ORDER BY c.category_type,c.name`,
+    [bookId,from,to],
+  ),pool.query(
+    `SELECT cc.id,cc.name,cc.is_active AS "isActive",
+            COALESCE(SUM(CASE
+              WHEN a.account_type='SYSTEM_INCOME' AND e.direction='CREDIT' THEN e.base_amount
+              WHEN a.account_type='SYSTEM_INCOME' THEN -e.base_amount
+              WHEN a.account_type='SYSTEM_EXPENSE' AND e.direction='DEBIT' THEN -e.base_amount
+              WHEN a.account_type='SYSTEM_EXPENSE' THEN e.base_amount
+              ELSE 0 END),0)::text amount
+     FROM cost_centers cc
+     JOIN transactions t ON t.cost_center_id=cc.id
+     JOIN transaction_entries e ON e.transaction_id=t.id
+     JOIN accounts a ON a.id=e.account_id
+     WHERE cc.book_id=$1 AND t.status IN ('POSTED','REVERSED')
+       AND t.transaction_date BETWEEN $2 AND $3
+       AND a.account_type IN ('SYSTEM_INCOME','SYSTEM_EXPENSE')
+     GROUP BY cc.id ORDER BY cc.sort_order,cc.name`,
+    [bookId,from,to],
+  )]);
+  return {items:result.rows,costCenters:costCenters.rows};
+}
 
 reportRoutes.get("/dashboard",async (c) => {
   const {pool,bookId,from,to} = await context(c);
@@ -119,17 +156,7 @@ reportRoutes.get("/cash-flow",async (c) => {
 
 reportRoutes.get("/income-expense",async (c) => {
   const {pool,bookId,from,to} = await context(c);
-  const result = await pool.query(
-    `SELECT c.id,c.name,c.category_type AS type,c.is_active AS "isActive",
-            COALESCE(SUM(CASE WHEN c.category_type='INCOME' AND e.direction='CREDIT' THEN e.base_amount
-                              WHEN c.category_type='EXPENSE' AND e.direction='DEBIT' THEN e.base_amount ELSE -e.base_amount END),0)::text amount
-     FROM categories c JOIN transaction_entries e ON e.account_id=c.system_account_id
-     JOIN transactions t ON t.id=e.transaction_id
-     WHERE c.book_id=$1 AND t.status IN ('POSTED','REVERSED') AND t.transaction_date BETWEEN $2 AND $3
-     GROUP BY c.id ORDER BY c.category_type,c.name`,
-    [bookId,from,to],
-  );
-  return c.json({items:result.rows});
+  return c.json(await loadIncomeExpenseReport(pool,bookId,from,to));
 });
 
 reportRoutes.get("/balances",async (c) => {

@@ -1,0 +1,4 @@
+/* React imports the shared production design system once from main.tsx. */
+@import "../DesignSystem/tokens.css";
+@import "../DesignSystem/app.css";
+@import "./shared.css";

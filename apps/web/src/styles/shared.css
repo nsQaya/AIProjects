@@ -1,0 +1,87 @@
+.visually-hidden {
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  position: absolute;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.primary-button:disabled,
+.danger-button:disabled,
+.icon-button:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+.button-label {
+  display: contents;
+}
+
+.button-spinner {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: button-spin .75s linear infinite;
+}
+
+@keyframes button-spin {
+  to { transform: rotate(360deg); }
+}
+
+.inline-feedback {
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.inline-feedback-error {
+  color: #8f302a;
+  border-color: #efc4bf;
+  background: var(--red-soft);
+}
+
+.inline-feedback-success {
+  color: var(--forest-700);
+  border-color: var(--forest-100);
+  background: var(--green-soft);
+}
+
+.inline-feedback-warning {
+  color: var(--amber);
+  border-color: #ead2ad;
+  background: var(--amber-soft);
+}
+
+.inline-feedback-info {
+  color: var(--blue);
+  border-color: #ccd9e9;
+  background: #e8eef7;
+}
+
+/* The legacy stylesheet defined columns but omitted the grid formatting context. */
+.settings-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.cost-center-report {
+  margin-top: 16px;
+}
+
+.cost-center-report .panel-head > strong {
+  color: var(--forest-700);
+  font-size: 18px;
+}
+
+.cost-center-legend {
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  column-gap: 24px;
+}

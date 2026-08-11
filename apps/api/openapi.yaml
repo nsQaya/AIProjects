@@ -14,15 +14,17 @@ paths:
   /books/{bookId}/members: { get: { summary: List members, responses: { '200': { description: Members } } }, post: { summary: Add member, responses: { '201': { description: Added } } } }
   /accounts: { get: { summary: List accounts, responses: { '200': { description: Accounts } } }, post: { summary: Create account, responses: { '201': { description: Created } } } }
   /categories: { get: { summary: List categories, responses: { '200': { description: Categories } } }, post: { summary: Create category, responses: { '201': { description: Created } } } }
+  /cost-centers: { get: { summary: List cost centers, responses: { '200': { description: Cost centers } } }, post: { summary: Create cost center, responses: { '201': { description: Created } } } }
+  /cost-centers/{costCenterId}: { patch: { summary: Update cost center, responses: { '200': { description: Updated } } }, delete: { summary: Delete unused or deactivate used cost center, responses: { '200': { description: Deleted or deactivated } } } }
   /contacts: { get: { summary: List contacts, responses: { '200': { description: Contacts } } }, post: { summary: Create contact, responses: { '201': { description: Created } } } }
-  /transactions: { get: { summary: List transactions, responses: { '200': { description: Transactions } } }, post: { summary: Post transaction, responses: { '201': { description: Posted } } } }
+  /transactions: { get: { summary: List transactions with optional cost-center filter, responses: { '200': { description: Transactions } } }, post: { summary: Post transaction, responses: { '201': { description: Posted } } } }
   /transactions/{transactionId}/reverse: { post: { summary: Reverse transaction, responses: { '201': { description: Reversed } } } }
   /scheduled-transactions: { get: { summary: Upcoming, responses: { '200': { description: Items } } }, post: { summary: Create one-time or recurring items, responses: { '201': { description: Created } } } }
   /scheduled-transactions/{scheduledId}/realize: { post: { summary: Post and complete a scheduled item, responses: { '200': { description: Realized } } } }
   /recurring-transactions: { get: { summary: List, responses: { '200': { description: Items } } }, post: { summary: Create, responses: { '201': { description: Created } } } }
   /reports/dashboard: { get: { summary: Dashboard, responses: { '200': { description: Aggregates } } } }
   /reports/cash-flow: { get: { summary: Cash flow by selected granularity, responses: { '200': { description: Periods } } } }
-  /reports/income-expense: { get: { summary: Income/expense, responses: { '200': { description: Report } } } }
+  /reports/income-expense: { get: { summary: Income/expense with cost-center breakdown, responses: { '200': { description: Report } } } }
   /reports/balances: { get: { summary: Balances, responses: { '200': { description: Report } } } }
   /reports/receivables-payables: { get: { summary: Receivables/payables, responses: { '200': { description: Report } } } }
   /sync/push: { post: { summary: Push operations, responses: { '200': { description: Results } } } }

@@ -3,7 +3,7 @@ import { currency, isoDate, money, uuid } from "../../common/schemas";
 
 export const transactionMutationSchema=z.object({
   bookId:uuid,type:z.enum(['INCOME','EXPENSE','TRANSFER','SALE','PURCHASE','COLLECTION','PAYMENT','OPENING_BALANCE','ADJUSTMENT']),
-  title:z.string().trim().min(1).max(200),amount:money,currencyCode:currency,accountId:uuid,targetAccountId:uuid.optional(),categoryId:uuid.optional(),contactId:uuid.optional(),
+  title:z.string().trim().min(1).max(200),amount:money,currencyCode:currency,accountId:uuid,targetAccountId:uuid.optional(),categoryId:uuid.optional(),costCenterId:uuid.nullable().optional(),contactId:uuid.optional(),
   transactionDate:isoDate,dueDate:isoDate.optional(),description:z.string().max(2000).optional(),clientOperationId:uuid,
 });
 export type TransactionMutationInput=z.infer<typeof transactionMutationSchema>;

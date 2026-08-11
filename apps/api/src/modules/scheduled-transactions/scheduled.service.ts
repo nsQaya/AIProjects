@@ -5,7 +5,10 @@ import { createTransactionWithClient } from "../transactions/transaction.service
 import { advanceRecurrence, type Frequency } from "../recurring-transactions/recurrence";
 
 const projection = `id,book_id AS "bookId",account_id AS "accountId",target_account_id AS "targetAccountId",
-  transaction_type AS "transactionType",category_id AS "categoryId",contact_id AS "contactId",
+  transaction_type AS "transactionType",category_id AS "categoryId",
+  cost_center_id AS "costCenterId",
+  (SELECT name FROM cost_centers cc WHERE cc.id=scheduled_transactions.cost_center_id) AS "costCenterName",
+  contact_id AS "contactId",
   title,amount::text,currency_code AS "currencyCode",scheduled_at AS "scheduledAt",
   reminder_at AS "reminderAt",status,series_id AS "seriesId",
   recurrence_frequency AS "recurrenceFrequency",recurrence_interval AS "recurrenceInterval",
@@ -44,18 +47,18 @@ export async function listScheduled(client: DbClient, bookId: string, includeCom
 
 export async function createScheduled(client: DbClient, userId: string, input: CreateScheduledInput) {
   return inTransaction(client, async (transaction) => {
-    await validateScope(transaction,input.bookId,input.accountId,input.targetAccountId,input.categoryId,input.transactionType);
+    await validateScope(transaction,input.bookId,input.accountId,input.targetAccountId,input.categoryId,input.transactionType,input.costCenterId);
     const occurrences = recurrenceDates(input);
     const seriesId = input.recurrence ? crypto.randomUUID() : null;
     const created = [];
     for (const scheduledAt of occurrences) {
       const result = await transaction.query(
         `INSERT INTO scheduled_transactions(
-           book_id,account_id,target_account_id,transaction_type,category_id,contact_id,title,
+           book_id,account_id,target_account_id,transaction_type,category_id,cost_center_id,contact_id,title,
            amount,currency_code,scheduled_at,reminder_at,series_id,recurrence_frequency,
            recurrence_interval,recurrence_end_at
-         ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING ${projection}`,
-        [input.bookId,input.accountId,input.targetAccountId??null,input.transactionType,input.categoryId??null,input.contactId??null,input.title,input.amount,input.currencyCode,scheduledAt,input.reminderAt??null,seriesId,input.recurrence?.frequency??null,input.recurrence?.interval??null,input.recurrence?.until??null],
+         ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING ${projection}`,
+        [input.bookId,input.accountId,input.targetAccountId??null,input.transactionType,input.categoryId??null,input.costCenterId??null,input.contactId??null,input.title,input.amount,input.currencyCode,scheduledAt,input.reminderAt??null,seriesId,input.recurrence?.frequency??null,input.recurrence?.interval??null,input.recurrence?.until??null],
       );
       created.push(result.rows[0]);
       await audit(transaction,input.bookId,userId,result.rows[0].id,"CREATE",result.rows[0]);
@@ -82,8 +85,8 @@ function recurrenceDates(input: CreateScheduledInput) {
 
 export async function updateScheduled(client: DbClient, userId: string, scheduledId: string, input: UpdateScheduledInput) {
   return inTransaction(client, async (transaction) => {
-    const found = await transaction.query<{ book_id: string; account_id: string; target_account_id: string | null; category_id: string | null; transaction_type:string }>(
-      `SELECT book_id,account_id,target_account_id,category_id,transaction_type FROM scheduled_transactions
+    const found = await transaction.query<{ book_id: string; account_id: string; target_account_id: string | null; category_id: string | null; cost_center_id: string | null; transaction_type:string }>(
+      `SELECT book_id,account_id,target_account_id,category_id,cost_center_id,transaction_type FROM scheduled_transactions
        WHERE id=$1 AND deleted_at IS NULL AND status IN ('PENDING','OVERDUE') FOR UPDATE`,
       [scheduledId],
     );
@@ -94,6 +97,8 @@ export async function updateScheduled(client: DbClient, userId: string, schedule
       input.targetAccountId===undefined?existing.target_account_id:input.targetAccountId,
       input.categoryId===undefined?existing.category_id:input.categoryId,
       input.transactionType??existing.transaction_type,
+      input.costCenterId===undefined?existing.cost_center_id:input.costCenterId,
+      input.costCenterId===undefined||input.costCenterId===existing.cost_center_id,
     );
     const result = await transaction.query(
       `UPDATE scheduled_transactions SET
@@ -101,14 +106,15 @@ export async function updateScheduled(client: DbClient, userId: string, schedule
          target_account_id=CASE WHEN $3::boolean THEN $4 ELSE target_account_id END,
          transaction_type=COALESCE($5,transaction_type),
          category_id=CASE WHEN $6::boolean THEN $7 ELSE category_id END,
-         contact_id=CASE WHEN $8::boolean THEN $9 ELSE contact_id END,
-         title=COALESCE($10,title),amount=COALESCE($11,amount),
-         scheduled_at=COALESCE($12,scheduled_at),
-         reminder_at=CASE WHEN $13::boolean THEN $14 ELSE reminder_at END,
-         status=CASE WHEN status='OVERDUE' AND COALESCE($12,scheduled_at)>=now() THEN 'PENDING' ELSE status END,
+         cost_center_id=CASE WHEN $8::boolean THEN $9 ELSE cost_center_id END,
+         contact_id=CASE WHEN $10::boolean THEN $11 ELSE contact_id END,
+         title=COALESCE($12,title),amount=COALESCE($13,amount),
+         scheduled_at=COALESCE($14,scheduled_at),
+         reminder_at=CASE WHEN $15::boolean THEN $16 ELSE reminder_at END,
+         status=CASE WHEN status='OVERDUE' AND COALESCE($14,scheduled_at)>=now() THEN 'PENDING' ELSE status END,
          updated_at=now(),version=version+1
-       WHERE id=$1 AND version=$15 RETURNING ${projection}`,
-      [scheduledId,input.accountId??null,input.targetAccountId!==undefined,input.targetAccountId??null,input.transactionType??null,input.categoryId!==undefined,input.categoryId??null,input.contactId!==undefined,input.contactId??null,input.title??null,input.amount??null,input.scheduledAt??null,input.reminderAt!==undefined,input.reminderAt??null,input.version],
+       WHERE id=$1 AND version=$17 RETURNING ${projection}`,
+      [scheduledId,input.accountId??null,input.targetAccountId!==undefined,input.targetAccountId??null,input.transactionType??null,input.categoryId!==undefined,input.categoryId??null,input.costCenterId!==undefined,input.costCenterId??null,input.contactId!==undefined,input.contactId??null,input.title??null,input.amount??null,input.scheduledAt??null,input.reminderAt!==undefined,input.reminderAt??null,input.version],
     );
     if (!result.rows[0]) throw new AppError(409,"VERSION_CONFLICT","Scheduled transaction changed on another device");
     await audit(transaction,existing.book_id,userId,scheduledId,"UPDATE",result.rows[0]);
@@ -140,10 +146,10 @@ export async function realizeScheduled(
     const found = await transaction.query<{
       id:string;book_id:string;account_id:string;target_account_id:string|null;
       transaction_type:"INCOME"|"EXPENSE"|"TRANSFER"|"SALE"|"PURCHASE"|"COLLECTION"|"PAYMENT";
-      category_id:string|null;contact_id:string|null;title:string;amount:string;currency_code:string;
+      category_id:string|null;cost_center_id:string|null;contact_id:string|null;title:string;amount:string;currency_code:string;
       scheduled_at:Date;status:string;version:number;completed_transaction_id:string|null;
     }>(
-      `SELECT id,book_id,account_id,target_account_id,transaction_type,category_id,contact_id,
+      `SELECT id,book_id,account_id,target_account_id,transaction_type,category_id,cost_center_id,contact_id,
               title,amount::text,currency_code,scheduled_at,status,version,completed_transaction_id
        FROM scheduled_transactions WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`,
       [scheduledId],
@@ -165,11 +171,12 @@ export async function realizeScheduled(
       accountId:item.account_id,
       ...(item.target_account_id?{targetAccountId:item.target_account_id}:{}),
       ...(item.category_id?{categoryId:item.category_id}:{}),
+      ...(item.cost_center_id?{costCenterId:item.cost_center_id}:{}),
       ...(item.contact_id?{contactId:item.contact_id}:{}),
       transactionDate:input.transactionDate??new Date().toISOString(),
       clientOperationId:input.clientOperationId,
       description:"Yaklaşan işlemden gerçekleşti olarak aktarıldı",
-    });
+    },{allowInactiveCostCenter:true});
     const updated = await transaction.query(
       `UPDATE scheduled_transactions SET status='COMPLETED',completed_transaction_id=$2,
               updated_at=now(),version=version+1
@@ -202,7 +209,7 @@ export async function scheduledBookId(client: DbClient, scheduledId: string) {
   return result.rows[0].book_id;
 }
 
-async function validateScope(client: DbClient, bookId: string, accountId: string, targetAccountId?: string | null, categoryId?: string | null, transactionType?: string) {
+async function validateScope(client: DbClient, bookId: string, accountId: string, targetAccountId?: string | null, categoryId?: string | null, transactionType?: string, costCenterId?: string | null, allowInactiveCostCenter=false) {
   const ids = [accountId,targetAccountId].filter(Boolean);
   const accounts = await client.query(`SELECT id FROM accounts WHERE book_id=$1 AND id=ANY($2::uuid[]) AND deleted_at IS NULL AND is_archived=false`,[bookId,ids]);
   if (accounts.rowCount !== new Set(ids).size) throw new AppError(422,"ACCOUNT_UNAVAILABLE","Scheduled transaction account is unavailable");
@@ -212,6 +219,10 @@ async function validateScope(client: DbClient, bookId: string, accountId: string
     const expected=["INCOME","SALE","COLLECTION"].includes(transactionType??"")?"INCOME":"EXPENSE";
     const category = await client.query(`SELECT 1 FROM categories WHERE id=$1 AND book_id=$2 AND category_type=$3 AND deleted_at IS NULL AND is_active=true`,[categoryId,bookId,expected]);
     if (!category.rowCount) throw new AppError(422,"CATEGORY_INVALID","Scheduled transaction category is unavailable");
+  }
+  if (costCenterId) {
+    const costCenter = await client.query(`SELECT 1 FROM cost_centers WHERE id=$1 AND book_id=$2 AND ($3::boolean OR is_active=true)`,[costCenterId,bookId,allowInactiveCostCenter]);
+    if (!costCenter.rowCount) throw new AppError(422,"COST_CENTER_INVALID","Scheduled transaction cost center is unavailable");
   }
 }
 

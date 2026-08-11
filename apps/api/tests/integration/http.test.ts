@@ -19,6 +19,8 @@ describe("HTTP shell", () => {
   it("serves the OpenAPI contract", async () => {
     const response = await app.request("/api/v1/openapi.yaml", {}, { ALLOWED_ORIGINS: "" } as never);
     expect(response.status).toBe(200);
-    expect(await response.text()).toContain("/transactions:");
+    const contract = await response.text();
+    expect(contract).toContain("/transactions:");
+    expect(contract).toContain("/cost-centers:");
   });
 });

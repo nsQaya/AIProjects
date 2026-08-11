@@ -1,8 +1,0 @@
-
-> @defterx/api@0.1.0 dev
-> wrangler dev --ip 127.0.0.1 --port 8787
-
-
- ⛅️ wrangler 4.119.0
-────────────────────
-

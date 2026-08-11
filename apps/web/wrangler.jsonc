@@ -1,7 +1,7 @@
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "defterx-web",
-  "main": "worker/index.js",
+  "main": "worker/index.ts",
   "compatibility_date": "2025-08-01",
   "assets": {
     "directory": "./dist",

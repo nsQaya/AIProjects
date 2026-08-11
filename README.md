@@ -1,71 +1,92 @@
 # DefterX
 
-DefterX, kişisel gelir-gider takibi ile küçük işletme cari takibini aynı sade arayüzde birleştiren, çift taraflı kayıt esaslı bir finans uygulamasıdır. Ürün adı çalışma adıdır; istemcilerde `APP_DISPLAY_NAME`, iOS yapılandırmasında ise bundle display name üzerinden değiştirilebilir.
+DefterX; kişisel gelir-gider, planlı işlem, hesap ve yatırım takibini çift taraflı kayıt esaslı finans çekirdeği üzerinde birleştiren bir uygulamadır.
 
-## Yapı
+Web istemcisi **React + strict TypeScript + Vite**, API ise **TypeScript + Hono + Cloudflare Workers** kullanır. Tarayıcı veritabanına doğrudan bağlanmaz:
 
-- `apps/api`: Cloudflare Workers üzerinde Hono REST API
-- `apps/web`: Cloudflare Worker Static Assets üzerinde çalışan modüler web istemcisi
+```text
+Browser → Cloudflare Web Worker → Cloudflare API Worker → Hyperdrive → Neon PostgreSQL
+```
+
+## Repository yapısı
+
+- `apps/web`: React web istemcisi, Vite build'i ve Cloudflare Static Assets Worker
+- `apps/api`: Hono REST API ve Cloudflare Worker yapılandırması
 - `apps/ios`: SwiftUI, GRDB, offline operation queue ve background sync içeren iOS istemcisi
-- `packages/contracts`: API ve domain sözleşmeleri
+- `packages/contracts`: web ve API arasında paylaşılan public DTO/sözleşmeler
 - `packages/database`: PostgreSQL migration ve seed dosyaları
-- `packages/shared`: parasal değer doğrulama araçları
-- `infra/cloudflare`: Cloudflare kurulum notları
-- `docs`: mimari, API, veri modeli ve ürün kapsamı
+- `packages/shared`: ortak para ve doğrulama yardımcıları
+- `infra/cloudflare`: Cloudflare kaynakları ve yayınlama notları
+- `docs`: mimari, ürün ve migration belgeleri
 
 ## Yerel kurulum
 
-Gereksinimler: Node.js 22+, PostgreSQL 16+, Wrangler 4+, iOS için macOS/Xcode 16+.
+Gereksinimler: Node.js 22+, npm, Wrangler 4+; yerel API/veritabanı geliştirmesi için PostgreSQL 16+.
 
 ```bash
 npm install
 cp apps/api/.dev.vars.example apps/api/.dev.vars
 npm run db:migrate -- --connection-string postgresql://postgres:postgres@localhost:5432/defterx
+```
+
+API Worker'ı çalıştırmak için:
+
+```bash
 npm run dev
 ```
 
-Web istemcisini Cloudflare yerel runtime ile açmak için ayrı bir terminalde:
+React web istemcisini ayrı bir terminalde çalıştırmak için:
 
 ```bash
 npm run web:dev
 ```
 
-Web Worker varsayılan olarak `http://127.0.0.1:3000` adresinde çalışır. Port doluysa
-Wrangler komutuna farklı bir `--port` değeri verilebilir.
+Vite varsayılan olarak `http://127.0.0.1:3000` adresini kullanır. Geliştirme API adresi `DEFTERX_API_BASE_URL` ile değiştirilebilir; belirtilmezse `apps/web/vite.config.ts` içindeki güvenli varsayılan kullanılır. Bu değer public runtime config'e dönüşür, secret olmamalıdır.
 
-Migration komutu `DATABASE_URL` ortam değişkenini de kabul eder. Sıfır veritabanında dosyaları ada göre tek transaction içinde uygular ve `schema_migrations` tablosuyla geçmişi korur.
+PowerShell örneği:
 
-## PostgreSQL ve Hyperdrive
-
-Önce PostgreSQL veritabanını ve TLS erişimini hazırlayın. Ardından `wrangler hyperdrive create defterx-postgres --connection-string=...` komutunun döndürdüğü id'yi `apps/api/wrangler.jsonc` içindeki `hyperdrive[].id` alanına yazın. Worker kodu yalnızca `HYPERDRIVE.connectionString` kullanır; production bağlantı bilgisi kaynak kodda tutulmaz.
-
-## Secrets ve Cloudflare
-
-```bash
-cd apps/api
-npx wrangler secret put JWT_SECRET
-npx wrangler secret put REFRESH_TOKEN_PEPPER
-npx wrangler deploy
+```powershell
+$env:DEFTERX_API_BASE_URL = "http://127.0.0.1:8787"
+npm run web:dev
 ```
 
-`ALLOWED_ORIGINS` değişkenini virgülle ayrılmış kesin origin listesi olarak ayarlayın. R2 ve Queue binding'leri yapılandırmada hazırdır. Rate Limiting binding production ortamında Cloudflare paneli/Wrangler üzerinden bağlanır. Ayrıntılar `infra/cloudflare/README.md` içindedir.
+## Ortam değişkenleri ve secret'lar
+
+API için `JWT_SECRET` ve `REFRESH_TOKEN_PEPPER` yalnızca Wrangler secret olarak tutulmalıdır. PostgreSQL bağlantı bilgisi production'da `HYPERDRIVE` binding'i üzerinden gelir; frontend bundle'ına veritabanı kimlik bilgisi veya başka bir secret konulmaz.
+
+Web Worker çalışma zamanı değerleri `apps/web/wrangler.jsonc` içindeki `APP_DISPLAY_NAME`, `APP_ENV` ve `API_BASE_URL` değişkenleridir. Worker `/config.js` yanıtını `no-store` ile üretir. API tarafındaki `ALLOWED_ORIGINS`, yayınlanan web origin'ini açıkça içermelidir.
+
+## Kontroller ve build
+
+```bash
+npm run check       # tüm workspace typecheck'leri + web lint/test
+npm test            # API ve web testleri
+npm run build       # contracts/shared/API/web production build
+```
+
+PostgreSQL entegrasyon testleri `TEST_DATABASE_URL` ile etkinleşir. Değişken yoksa dış veritabanı isteyen test grubu atlanır; unit ve HTTP testleri çalışmaya devam eder.
+
+Web'e özel komutlar:
+
+```bash
+npm run typecheck --workspace @defterx/web
+npm run test --workspace @defterx/web
+npm run preview --workspace @defterx/web
+```
+
+## Cloudflare deployment
+
+Önerilen sıra: migration'ları kontrollü çalıştır, API'yi yayınla ve health/smoke testini doğrula, ardından web Worker'ını yayınla.
+
+```bash
+npm run deploy:api
+npm run deploy:web
+```
+
+API `/api/v1` altında versiyonlanır; health endpoint'i `/health`, OpenAPI belgesi `/api/v1/openapi.yaml` adresindedir. Web Worker, Vite `dist` varlıklarını sunar ve SPA fallback ile doğrudan/yenilenen route'ları destekler.
+
+Cloudflare binding'leri ve operasyon ayrıntıları için [Cloudflare notlarına](infra/cloudflare/README.md), tamamlanan React geçişinin doğrulama ve dağıtım kaydı için [migration kapanış raporuna](docs/migrations/react-migration-completion-report.md) bakın.
 
 ## iOS
 
-`apps/ios` dizinini Xcode ile Swift Package olarak açın. `DefterX/Resources/Configuration.swift` içindeki geliştirme API adresini scheme configuration ile değiştirin. GRDB bağımlılığı Swift Package Manager tarafından çözülür. Face ID kullanımı için üreten Xcode hedefinin `Info.plist` dosyasına `NSFaceIDUsageDescription` ekleyin. BackgroundTasks identifier: `com.example.defterx.sync`.
-
-## Kontroller
-
-```bash
-npm run check
-npm test
-npm run build
-```
-
-PostgreSQL integration testleri için `TEST_DATABASE_URL` ayarlanır. Değişken yoksa yalnızca dış veritabanı isteyen test grubu atlanır; saf domain ve HTTP testleri çalışmaya devam eder.
-
-## API
-
-API `/api/v1` altında versiyonlanır. OpenAPI belgesi `apps/api/openapi.yaml` ve çalışma zamanında `/api/v1/openapi.yaml` adresindedir. Health endpoint'i `/health` adresindedir.
-
-Deployment, güvenlik ve operasyonel sınırlamalar için [Cloudflare notları](infra/cloudflare/README.md) ile [V1 tamamlanma raporuna](docs/product/v1-completion-report.md) bakın.
+`apps/ios` dizinini Xcode ile açın. Geliştirme API adresi scheme/configuration üzerinden ayarlanır. GRDB bağımlılığı Swift Package Manager tarafından çözülür; Face ID ve background task ayarları iOS projesinin README/configuration dosyalarında açıklanır.
