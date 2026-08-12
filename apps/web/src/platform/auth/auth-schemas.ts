@@ -1,4 +1,10 @@
 import { z } from "zod";
+import type {
+  ChangePasswordRequest,
+  ForgotPasswordRequest,
+  RegisterRequest,
+  ResetPasswordRequest,
+} from "@defterx/contracts";
 
 export const authUserSchema = z
   .object({
@@ -28,6 +34,12 @@ export const registerResponseSchema = loginResponseSchema
 
 export const refreshResponseSchema = authTokensSchema.passthrough();
 
+export const forgotPasswordResponseSchema = z
+  .object({
+    accepted: z.literal(true),
+  })
+  .passthrough();
+
 export const authSessionSchema = loginResponseSchema
   .extend({
     book: z.unknown().optional(),
@@ -39,6 +51,7 @@ export type AuthTokens = z.infer<typeof authTokensSchema>;
 export type LoginResponse = z.infer<typeof loginResponseSchema>;
 export type RegisterResponse = z.infer<typeof registerResponseSchema>;
 export type RefreshResponse = z.infer<typeof refreshResponseSchema>;
+export type ForgotPasswordResponse = z.infer<typeof forgotPasswordResponseSchema>;
 export type AuthSession = z.infer<typeof authSessionSchema>;
 
 export interface LoginInput {
@@ -46,6 +59,7 @@ export interface LoginInput {
   password: string;
 }
 
-export interface RegisterInput extends LoginInput {
-  displayName: string;
-}
+export type RegisterInput = RegisterRequest;
+export type ForgotPasswordInput = ForgotPasswordRequest;
+export type ResetPasswordInput = ResetPasswordRequest;
+export type ChangePasswordInput = ChangePasswordRequest;

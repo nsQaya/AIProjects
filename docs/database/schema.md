@@ -16,6 +16,7 @@ Migration’lar `packages/database/migrations` altında sıralıdır. Değiştir
 - `012_scheduled_recurrence_realization`: planlı işlem tekrarları ve gerçekleşme bağlantısı
 - `013_investment_sales`: yatırım satış lotları ve satış hareketi bütünlüğü
 - `014_cost_centers`: bağımsız masraf merkezleri; işlem ve planlı işlem bağlantıları ile aynı defter guard’ları
+- `015_password_resets`: tek kullanımlık, süreli ve yalnız hash olarak saklanan parola sıfırlama kodları
 
 Domain tabloları UUID, UTC `TIMESTAMPTZ` ve version alanlarını taşır; finansal
 kayıtlar soft-delete/ters kayıt kurallarına tabidir. Masraf merkezlerinde geçmiş
@@ -33,6 +34,6 @@ npm run db:migrate -- --connection-string postgresql://...
 
 Runner `schema_migrations` tablosunu oluşturur, her dosyayı ayrı transaction’da uygular ve uygulanmış dosyayı yeniden çalıştırmaz.
 
-`014_cost_centers.sql` kullanan API sürümü yayınlanmadan önce migration hedef Neon
+Yeni şema kullanan API sürümü yayınlanmadan önce ilgili migration hedef Neon
 veritabanına uygulanmalıdır. Dağıtım sırası veritabanı migration'ı, API Worker
 health/readiness doğrulaması, web Worker ve son olarak canlı Edge E2E kontrolüdür.

@@ -15,6 +15,7 @@ import {
   DialogHeader,
 } from "../../components/ui";
 import { isoAtLocalNoon, today } from "../../lib/date";
+import { errorMessage } from "../../lib/error-message";
 import { decimalString } from "../../lib/format";
 import type {
   SaveCategoryInput,
@@ -38,6 +39,95 @@ function formString(values: FormData, name: string): string {
 interface MutationDialogProps<T> {
   onClose: () => void;
   onSave: (input: T) => Promise<void>;
+}
+
+interface PasswordChangeDialogProps {
+  onClose: () => void;
+  onSave: (input: { currentPassword: string; newPassword: string }) => Promise<void>;
+}
+
+export function PasswordChangeDialog({ onClose, onSave }: PasswordChangeDialogProps) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const values = new FormData(event.currentTarget);
+    const currentPassword = formString(values, "currentPassword");
+    const newPassword = formString(values, "newPassword");
+
+    if (newPassword !== formString(values, "newPasswordConfirmation")) {
+      setError("Yeni şifre ve tekrarı eşleşmiyor.");
+      return;
+    }
+
+    setError(null);
+    setBusy(true);
+    void onSave({ currentPassword, newPassword })
+      .then(onClose)
+      .catch((reason: unknown) => setError(errorMessage(reason)))
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <Dialog
+      id="password-change-dialog"
+      className="compact-dialog"
+      dismissible={!busy}
+      open
+      onClose={onClose}
+    >
+      <form onSubmit={handleSubmit} aria-busy={busy || undefined}>
+        <DialogHeader eyebrow="Profil güvenliği" title="Şifreyi değiştir">
+          <p>Mevcut şifrenizi doğrulayarak yeni bir şifre belirleyin.</p>
+        </DialogHeader>
+        <div className="form-grid dialog-form-grid">
+          <label className="full-field">
+            <span>Mevcut şifre</span>
+            <input
+              name="currentPassword"
+              type="password"
+              maxLength={128}
+              autoComplete="current-password"
+              disabled={busy}
+              required
+            />
+          </label>
+          <label className="full-field">
+            <span>Yeni şifre</span>
+            <input
+              name="newPassword"
+              type="password"
+              minLength={12}
+              maxLength={128}
+              autoComplete="new-password"
+              disabled={busy}
+              required
+            />
+          </label>
+          <label className="full-field">
+            <span>Yeni şifre tekrarı</span>
+            <input
+              name="newPasswordConfirmation"
+              type="password"
+              minLength={12}
+              maxLength={128}
+              autoComplete="new-password"
+              disabled={busy}
+              required
+            />
+          </label>
+        </div>
+        <DialogFeedback message={error} />
+        <DialogActions>
+          <DialogCancelButton disabled={busy}>Vazgeç</DialogCancelButton>
+          <Button type="submit" variant="primary" loading={busy}>
+            Şifreyi güncelle
+          </Button>
+        </DialogActions>
+      </form>
+    </Dialog>
+  );
 }
 
 interface CategoryDialogProps extends MutationDialogProps<SaveCategoryInput> {

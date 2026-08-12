@@ -22,5 +22,8 @@ describe("HTTP shell", () => {
     const contract = await response.text();
     expect(contract).toContain("/transactions:");
     expect(contract).toContain("/cost-centers:");
+    expect(contract).toContain("/auth/forgot-password:");
+    expect(contract).toContain("/auth/reset-password:");
+    expect(contract).toContain("/me/password:");
   });
 });

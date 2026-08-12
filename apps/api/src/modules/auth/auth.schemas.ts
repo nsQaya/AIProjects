@@ -8,3 +8,11 @@ export const registerSchema = z.object({
 export const loginSchema = z.object({ email: z.email().transform((value) => value.toLowerCase()), password: z.string().min(1).max(128) });
 export const refreshSchema = z.object({ refreshToken: z.string().min(32).max(512) });
 
+export const forgotPasswordSchema = z.object({
+  email: z.email().max(254).transform((value) => value.toLowerCase()),
+});
+
+export const resetPasswordSchema = z.object({
+  token: z.string().min(1).max(512),
+  newPassword: z.string().min(12).max(128),
+});

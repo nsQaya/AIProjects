@@ -34,6 +34,7 @@ export function UpcomingRoute() {
   return (
     <>
       <UpcomingPage
+        accounts={snapshot.accounts}
         items={snapshot.upcoming}
         onNew={() => setEditing(null)}
         onEdit={(item) => setEditing(item)}

@@ -2,6 +2,12 @@ import { isAPIError } from "../platform/api/api-error";
 
 const messages: Record<string, string> = {
   INVALID_CREDENTIALS: "E-posta veya parola hatalı.",
+  INVALID_CURRENT_PASSWORD: "Mevcut şifreniz hatalı.",
+  INVALID_PASSWORD_RESET_TOKEN: "Şifre sıfırlama bağlantısı geçersiz veya süresi dolmuş.",
+  PASSWORD_RESET_TOKEN_INVALID: "Şifre sıfırlama bağlantısı geçersiz veya süresi dolmuş.",
+  PASSWORD_RESET_EMAIL_UNAVAILABLE:
+    "Şifre sıfırlama e-postası şu anda gönderilemiyor. Lütfen daha sonra tekrar deneyin.",
+  PASSWORD_UNCHANGED: "Yeni şifreniz mevcut şifrenizden farklı olmalıdır.",
   EMAIL_EXISTS: "Bu e-posta zaten kayıtlı.",
   NEGATIVE_BALANCE_NOT_ALLOWED: "Bu hesap eksi bakiyeye düşemez.",
   ACCOUNT_LIMIT_EXCEEDED: "Hesap limiti aşılıyor.",

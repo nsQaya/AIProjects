@@ -2,39 +2,83 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 
-import type { ScheduledTransactionView } from "../../finance/finance-views";
+import type { AccountView, ScheduledTransactionView } from "../../finance/finance-views";
 import { UpcomingPage } from "./UpcomingPage";
 
-function scheduledItem(
-  id: string,
-  title: string,
-  status: ScheduledTransactionView["status"],
-): ScheduledTransactionView {
+const BOOK_ID = "book-1";
+const BANK_ID = "account-1";
+const CASH_ID = "account-2";
+const CARD_ID = "account-3";
+
+function account(id: string, name: string, accountType: AccountView["accountType"]): AccountView {
   return {
     id,
-    bookId: "book-1",
-    accountId: "account-1",
-    targetAccountId: null,
-    transactionType: "EXPENSE",
+    bookId: BOOK_ID,
+    contactId: null,
+    name,
+    accountType,
+    normalBalance: accountType === "CREDIT_CARD" ? "CREDIT" : "DEBIT",
+    currencyCode: "TRY",
+    allowNegativeBalance: accountType === "CREDIT_CARD",
+    creditLimit: accountType === "CREDIT_CARD" ? "10000.00" : null,
+    isArchived: false,
+    sortOrder: 0,
+    version: 1,
+    balance: "0.00",
+    displayBalance: "0.00",
+    availableCredit: accountType === "CREDIT_CARD" ? "10000.00" : null,
+    ui: {
+      balance: 0,
+      displayBalance: 0,
+      creditLimit: accountType === "CREDIT_CARD" ? 10000 : null,
+      availableCredit: accountType === "CREDIT_CARD" ? 10000 : null,
+    },
+  };
+}
+
+const accounts: readonly AccountView[] = [
+  account(BANK_ID, "Banka", "BANK"),
+  account(CASH_ID, "Nakit", "CASH"),
+  account(CARD_ID, "Kredi kartı", "CREDIT_CARD"),
+];
+
+interface ScheduledItemInput {
+  accountId: string;
+  date: string;
+  id: string;
+  status: ScheduledTransactionView["status"];
+  targetAccountId?: string | null;
+  title: string;
+  transactionType: ScheduledTransactionView["transactionType"];
+}
+
+function scheduledItem(input: ScheduledItemInput): ScheduledTransactionView {
+  const kind = input.transactionType.toLowerCase() as ScheduledTransactionView["ui"]["kind"];
+  return {
+    id: input.id,
+    bookId: BOOK_ID,
+    accountId: input.accountId,
+    targetAccountId: input.targetAccountId ?? null,
+    transactionType: input.transactionType,
     categoryId: "category-1",
     costCenterId: null,
     costCenterName: null,
     contactId: null,
-    title,
+    title: input.title,
     amount: "125.50",
     currencyCode: "TRY",
-    scheduledAt: "2026-08-10T09:00:00.000Z",
+    scheduledAt: `${input.date}T09:00:00.000Z`,
     reminderAt: null,
-    status,
+    status: input.status,
     seriesId: null,
-    recurrenceFrequency: status === "PENDING" ? "MONTHLY" : null,
-    recurrenceInterval: status === "PENDING" ? 1 : null,
-    recurrenceEndAt: status === "PENDING" ? "2026-12-10T09:00:00.000Z" : null,
-    completedTransactionId: status === "COMPLETED" ? "transaction-1" : null,
+    recurrenceFrequency: input.status === "PENDING" ? "MONTHLY" : null,
+    recurrenceInterval: input.status === "PENDING" ? 1 : null,
+    recurrenceEndAt: input.status === "PENDING" ? "2026-12-10T09:00:00.000Z" : null,
+    completedTransactionId: input.status === "COMPLETED" ? "transaction-1" : null,
     version: 2,
     ui: {
-      kind: "expense",
-      date: "2026-08-10",
+      kind,
+      date: input.date,
       amount: 125.5,
       categoryName: "Fatura",
       costCenterName: "",
@@ -42,9 +86,31 @@ function scheduledItem(
   };
 }
 
-const pending = scheduledItem("scheduled-pending", "Aylık internet", "PENDING");
-const overdue = scheduledItem("scheduled-overdue", "Gecikmiş kira", "OVERDUE");
-const completed = scheduledItem("scheduled-completed", "Ödenen elektrik", "COMPLETED");
+const pending = scheduledItem({
+  accountId: BANK_ID,
+  date: "2026-08-10",
+  id: "scheduled-pending",
+  status: "PENDING",
+  title: "Aylık internet",
+  transactionType: "EXPENSE",
+});
+const overdue = scheduledItem({
+  accountId: BANK_ID,
+  date: "2026-08-11",
+  id: "scheduled-overdue",
+  status: "OVERDUE",
+  targetAccountId: CASH_ID,
+  title: "Gecikmiş kira",
+  transactionType: "TRANSFER",
+});
+const completed = scheduledItem({
+  accountId: CASH_ID,
+  date: "2026-08-12",
+  id: "scheduled-completed",
+  status: "COMPLETED",
+  title: "Ödenen elektrik",
+  transactionType: "INCOME",
+});
 const items = [pending, overdue, completed];
 
 function callbacks() {
@@ -56,10 +122,14 @@ function callbacks() {
   };
 }
 
-function renderPage(actions = callbacks()) {
+function renderPage(
+  actions = callbacks(),
+  pageItems: readonly ScheduledTransactionView[] = items,
+  pageAccounts: readonly AccountView[] = accounts,
+) {
   render(
     <MemoryRouter>
-      <UpcomingPage items={items} {...actions} />
+      <UpcomingPage accounts={pageAccounts} items={pageItems} {...actions} />
     </MemoryRouter>,
   );
   return actions;
@@ -96,6 +166,131 @@ describe("UpcomingPage", () => {
     expect(screen.getByText(pending.title)).toBeInTheDocument();
     expect(screen.getByText(overdue.title)).toBeInTheDocument();
     expect(screen.getByText(completed.title)).toBeInTheDocument();
+  });
+
+  it("searches only the title with Turkish case rules", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.type(screen.getByRole("searchbox", { name: "Açıklamada ara" }), "AYLIK");
+
+    expect(screen.getByText(pending.title)).toBeInTheDocument();
+    expect(screen.queryByText(overdue.title)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Gerçekleşmeyenler 1" })).toBeInTheDocument();
+
+    await user.clear(screen.getByRole("searchbox", { name: "Açıklamada ara" }));
+    await user.type(screen.getByRole("searchbox", { name: "Açıklamada ara" }), "Fatura");
+
+    expect(screen.queryByText(pending.title)).not.toBeInTheDocument();
+    expect(screen.getByText("Bu filtrelerde kayıt yok.")).toBeInTheDocument();
+  });
+
+  it("filters by type and updates status counts from the filtered records", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Tür" }), "TRANSFER");
+
+    expect(screen.queryByText(pending.title)).not.toBeInTheDocument();
+    expect(screen.getByText(overdue.title)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Gerçekleşmeyenler 1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Gerçekleşenler 0" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Tümü 1" })).toBeInTheDocument();
+  });
+
+  it("matches a transfer when either its source or target account is selected", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByText("Hesaplar"));
+    await user.click(screen.getByRole("checkbox", { name: "Banka" }));
+
+    expect(screen.queryByText(pending.title)).not.toBeInTheDocument();
+    expect(screen.getByText(overdue.title)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Gerçekleşmeyenler 1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Gerçekleşenler 1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Tümü 2" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("checkbox", { name: "Nakit" }));
+    expect(screen.queryByText(overdue.title)).not.toBeInTheDocument();
+    expect(screen.getByText("Bu filtrelerde kayıt yok.")).toBeInTheDocument();
+  });
+
+  it("keeps records for removed accounts while every known account is selected", async () => {
+    const user = userEvent.setup();
+    const removedAccountItem = scheduledItem({
+      accountId: "removed-account",
+      date: "2026-08-13",
+      id: "scheduled-removed-account",
+      status: "PENDING",
+      title: "Eski hesaptan ödeme",
+      transactionType: "EXPENSE",
+    });
+    renderPage(callbacks(), [...items, removedAccountItem]);
+
+    expect(screen.getByText(removedAccountItem.title)).toBeInTheDocument();
+
+    await user.click(screen.getByText("Hesaplar"));
+    await user.click(screen.getByRole("checkbox", { name: "Tüm hesaplar" }));
+
+    expect(screen.queryByText(removedAccountItem.title)).not.toBeInTheDocument();
+    expect(screen.getByText("Bu filtrelerde kayıt yok.")).toBeInTheDocument();
+  });
+
+  it("includes both date boundaries and combines dates with the status filter", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: "Tümü 3" }));
+    await user.type(screen.getByLabelText("Başlangıç"), "2026-08-10");
+    await user.type(screen.getByLabelText("Bitiş"), "2026-08-11");
+
+    expect(screen.getByText(pending.title)).toBeInTheDocument();
+    expect(screen.getByText(overdue.title)).toBeInTheDocument();
+    expect(screen.queryByText(completed.title)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Gerçekleşmeyenler 2" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Gerçekleşenler 0" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Tümü 2" })).toHaveClass("active");
+  });
+
+  it("shows a range error and deterministically returns no records for reversed dates", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.type(screen.getByLabelText("Başlangıç"), "2026-08-12");
+    await user.type(screen.getByLabelText("Bitiş"), "2026-08-10");
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Başlangıç tarihi bitiş tarihinden sonra olamaz.",
+    );
+    expect(screen.getByRole("button", { name: "Gerçekleşmeyenler 0" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Gerçekleşenler 0" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Tümü 0" })).toBeInTheDocument();
+    expect(screen.getByText("Bu filtrelerde kayıt yok.")).toBeInTheDocument();
+  });
+
+  it("clears every secondary filter and restores the default OPEN view", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: "Gerçekleşenler 1" }));
+    await user.type(screen.getByRole("searchbox", { name: "Açıklamada ara" }), "elektrik");
+    await user.selectOptions(screen.getByRole("combobox", { name: "Tür" }), "INCOME");
+    await user.type(screen.getByLabelText("Başlangıç"), "2026-08-12");
+    await user.type(screen.getByLabelText("Bitiş"), "2026-08-12");
+    await user.click(screen.getByText("Hesaplar"));
+    await user.click(screen.getByRole("checkbox", { name: "Banka" }));
+    await user.click(screen.getByRole("button", { name: "Temizle" }));
+
+    expect(screen.getByRole("searchbox", { name: "Açıklamada ara" })).toHaveValue("");
+    expect(screen.getByRole("combobox", { name: "Tür" })).toHaveValue("");
+    expect(screen.getByLabelText("Başlangıç")).toHaveValue("");
+    expect(screen.getByLabelText("Bitiş")).toHaveValue("");
+    expect(screen.getByRole("checkbox", { name: "Tüm hesaplar" })).toBeChecked();
+    expect(screen.getByRole("button", { name: "Gerçekleşmeyenler 2" })).toHaveClass("active");
+    expect(screen.getByText(pending.title)).toBeInTheDocument();
+    expect(screen.getByText(overdue.title)).toBeInTheDocument();
+    expect(screen.queryByText(completed.title)).not.toBeInTheDocument();
   });
 
   it("calls edit with the selected open record", async () => {

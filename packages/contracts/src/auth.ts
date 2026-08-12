@@ -36,6 +36,20 @@ export interface RefreshTokenRequest {
   refreshToken: string;
 }
 
+export interface ForgotPasswordRequest {
+  email: string;
+}
+
+export interface ResetPasswordRequest {
+  token: string;
+  newPassword: string;
+}
+
+export interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
+}
+
 export type LogoutRequest = RefreshTokenRequest;
 
 export interface RegisterResponse extends AuthTokensDTO {
@@ -49,4 +63,9 @@ export interface LoginResponse extends AuthTokensDTO {
 
 export type RefreshTokenResponse = AuthTokensDTO;
 export type LogoutResponse = void;
+export interface ForgotPasswordResponse {
+  accepted: true;
+}
+export type ResetPasswordResponse = void;
+export type ChangePasswordResponse = AuthTokensDTO;
 export type CurrentUserResponse = CurrentUserDTO;

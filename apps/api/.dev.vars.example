@@ -1,4 +1,7 @@
 JWT_SECRET=replace-with-at-least-32-random-characters
 REFRESH_TOKEN_PEPPER=replace-with-a-different-random-secret
+PASSWORD_RESET_TOKEN_PEPPER=replace-with-a-third-random-secret
+PASSWORD_RESET_FROM_EMAIL=no-reply@example.com
+WEB_APP_URL=http://127.0.0.1:3000
+# EMAIL is an optional Cloudflare Email binding. Forgot-password returns 503 until configured.
 # Local Wrangler Hyperdrive binding supplies HYPERDRIVE.connectionString.
-

@@ -40,6 +40,31 @@ function jsonResponse(value: unknown, status = 200): Response {
 }
 
 describe("APIClient auth lifecycle", () => {
+  it("persists fresh tokens after changing the password while retaining the user", async () => {
+    const { store, save } = createSessionStore();
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        accessToken: "password-access-token",
+        refreshToken: "password-refresh-token",
+        expiresIn: 1200,
+      }),
+    );
+    const client = new APIClient("https://api.example.test", store, { fetch: fetchMock });
+
+    await client.changePassword({
+      currentPassword: "EskiGucluSifre123!",
+      newPassword: "YeniGucluSifre123!",
+    });
+
+    expect(client.session).toEqual({
+      ...initialSession,
+      accessToken: "password-access-token",
+      refreshToken: "password-refresh-token",
+      expiresIn: 1200,
+    });
+    expect(save).toHaveBeenCalledWith(client.session);
+  });
+
   it("shares one refresh request across simultaneous 401 responses", async () => {
     let resolveRefresh!: (response: Response) => void;
     const refreshResponse = new Promise<Response>((resolve) => {

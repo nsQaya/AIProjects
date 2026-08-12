@@ -4,10 +4,35 @@ export interface RateLimiterBinding {
   limit(input: { key: string }): Promise<{ success: boolean }>;
 }
 
+export interface PasswordResetMail {
+  recipientEmail: string;
+  displayName: string;
+  token: string;
+  expiresAt: string;
+}
+
+export interface PasswordResetMailer {
+  sendPasswordResetEmail(message: PasswordResetMail): Promise<void>;
+}
+
+export interface EmailBinding {
+  send(message: {
+    to: string;
+    from: string | { email: string; name?: string };
+    subject: string;
+    html: string;
+    text: string;
+  }): Promise<unknown>;
+}
+
 export interface Env {
   HYPERDRIVE: Hyperdrive;
   JWT_SECRET: string;
   REFRESH_TOKEN_PEPPER: string;
+  PASSWORD_RESET_TOKEN_PEPPER: string;
+  PASSWORD_RESET_FROM_EMAIL: string;
+  WEB_APP_URL: string;
+  EMAIL?: EmailBinding;
   APP_DISPLAY_NAME: string;
   ALLOWED_ORIGINS: string;
   ACCESS_TOKEN_TTL_SECONDS: string;

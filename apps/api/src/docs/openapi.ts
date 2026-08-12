@@ -51,8 +51,14 @@ paths:
     post: { security: [], summary: Login, responses: { '200': { description: Tokens }, '401': { description: Invalid credentials } } }
   /auth/refresh:
     post: { security: [], summary: Rotate refresh token, responses: { '200': { description: Rotated } } }
+  /auth/forgot-password:
+    post: { security: [], summary: Request a password reset email without disclosing membership, responses: { '202': { description: Accepted }, '503': { description: Password reset email unavailable } } }
+  /auth/reset-password:
+    post: { security: [], summary: Reset a password with a single-use token, responses: { '204': { description: Password reset }, '400': { description: Invalid or expired token } } }
   /me:
     get: { summary: Current user, responses: { '200': { description: User } } }
+  /me/password:
+    patch: { summary: Change password and rotate all refresh sessions, responses: { '200': { description: Fresh tokens }, '401': { description: Current password is incorrect } } }
   /books:
     get: { summary: List books, responses: { '200': { description: Books } } }
     post: { summary: Create book, responses: { '201': { description: Created } } }

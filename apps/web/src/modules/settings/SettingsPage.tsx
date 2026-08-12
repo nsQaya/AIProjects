@@ -14,6 +14,7 @@ import {
   InstrumentDialog,
   InstrumentPriceDialog,
   InvestmentTypeDialog,
+  PasswordChangeDialog,
 } from "./SettingsDialogs";
 import type {
   ConfirmSettingsAction,
@@ -27,6 +28,7 @@ type SettingsDialogState =
   | { type: "cost-center"; item: CostCenterDTO | null }
   | { type: "instrument"; item: InvestmentInstrumentDTO | null }
   | { type: "investment-type"; item: InvestmentAssetTypeDTO | null }
+  | { type: "password" }
   | { type: "price"; item: InvestmentInstrumentDTO };
 
 export interface SettingsPageProps {
@@ -118,21 +120,38 @@ export function SettingsPage({
         </article>
 
         <article className="panel settings-card">
-          <h2>Veri ilkeleri</h2>
-          <p>
-            Tüm finansal kayıtlar canlı API üzerinden Neon PostgreSQL’de tutulur.
-            Tarayıcıda demo bakiye veya demo işlem saklanmaz.
-          </p>
-          <div className="settings-row">
-            <span>Para birimi</span>
-            <b>{model.book?.baseCurrency ?? "TRY"}</b>
-          </div>
+          <h2>Profil ve güvenlik</h2>
           <div className="settings-row">
             <span>Hesap sahibi</span>
-            <b>{model.user?.displayName || model.user?.email || "—"}</b>
+            <b>{model.user?.displayName || "—"}</b>
           </div>
+          <div className="settings-row">
+            <span>E-posta</span>
+            <b>{model.user?.email || "—"}</b>
+          </div>
+          <p>Şifrenizi düzenli aralıklarla yenileyerek hesabınızı koruyabilirsiniz.</p>
+          <button
+            className="secondary-button"
+            id="open-password-change-dialog"
+            type="button"
+            onClick={() => setDialog({ type: "password" })}
+          >
+            Şifreyi değiştir
+          </button>
         </article>
       </div>
+
+      <article className="panel settings-card">
+        <h2>Veri ilkeleri</h2>
+        <p>
+          Tüm finansal kayıtlar canlı API üzerinden Neon PostgreSQL’de tutulur.
+          Tarayıcıda demo bakiye veya demo işlem saklanmaz.
+        </p>
+        <div className="settings-row">
+          <span>Para birimi</span>
+          <b>{model.book?.baseCurrency ?? "TRY"}</b>
+        </div>
+      </article>
 
       {actionError ? <InlineFeedback tone="error">{actionError}</InlineFeedback> : null}
 
@@ -507,6 +526,12 @@ export function SettingsPage({
           instrument={dialog.item}
           onClose={() => setDialog(null)}
           onSave={actions.onSaveInstrumentPrice}
+        />
+      ) : null}
+      {dialog?.type === "password" ? (
+        <PasswordChangeDialog
+          onClose={() => setDialog(null)}
+          onSave={actions.onChangePassword}
         />
       ) : null}
     </section>

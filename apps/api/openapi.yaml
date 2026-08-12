@@ -9,7 +9,10 @@ paths:
   /auth/register: { post: { summary: Register, responses: { '201': { description: Created } } } }
   /auth/login: { post: { summary: Login, responses: { '200': { description: Tokens } } } }
   /auth/refresh: { post: { summary: Rotate refresh token, responses: { '200': { description: Tokens } } } }
+  /auth/forgot-password: { post: { summary: Request password reset email without disclosing membership, responses: { '202': { description: Accepted }, '503': { description: Email unavailable } } } }
+  /auth/reset-password: { post: { summary: Reset password with a single-use token, responses: { '204': { description: Reset }, '400': { description: Invalid or expired token } } } }
   /me: { get: { summary: Current user, responses: { '200': { description: User } } } }
+  /me/password: { patch: { summary: Change password and rotate sessions, responses: { '200': { description: Fresh tokens }, '401': { description: Incorrect current password } } } }
   /books: { get: { summary: List books, responses: { '200': { description: Books } } }, post: { summary: Create book, responses: { '201': { description: Created } } } }
   /books/{bookId}/members: { get: { summary: List members, responses: { '200': { description: Members } } }, post: { summary: Add member, responses: { '201': { description: Added } } } }
   /accounts: { get: { summary: List accounts, responses: { '200': { description: Accounts } } }, post: { summary: Create account, responses: { '201': { description: Created } } } }

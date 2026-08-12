@@ -3,13 +3,19 @@ import { isoAtLocalNoon } from "../../lib/date";
 import { SettingsPage, type SettingsActions } from "../../modules/settings";
 import { Configuration } from "../../platform/config/runtime-config";
 import { useFinance } from "../../providers/FinanceProvider";
+import { useToast } from "../ToastProvider";
 
 export function SettingsRoute() {
-  const { logout } = useAuth();
+  const { changePassword, logout } = useAuth();
+  const { showToast } = useToast();
   const { apiStatus, mutate, service, snapshot } = useFinance();
 
   const actions: SettingsActions = {
     onLogout: logout,
+    onChangePassword: async (input) => {
+      await changePassword(input);
+      showToast("Şifreniz güncellendi.");
+    },
     onSaveCategory: async (input) => {
       if (input.mode === "create") {
         await mutate(() => service.createCategory(input), "Kategori eklendi.");

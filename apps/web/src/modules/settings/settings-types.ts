@@ -108,6 +108,10 @@ export interface SettingsActions {
   onDeleteInstrument: (entity: VersionedSettingsEntity) => Promise<void>;
   onDeleteInvestmentType: (entity: VersionedSettingsEntity) => Promise<void>;
   onLogout: () => Promise<void>;
+  onChangePassword: (input: {
+    currentPassword: string;
+    newPassword: string;
+  }) => Promise<void>;
   onSaveCategory: (input: SaveCategoryInput) => Promise<void>;
   onSaveCostCenter: (input: SaveCostCenterInput) => Promise<void>;
   onSaveInstrument: (input: SaveInstrumentInput) => Promise<void>;

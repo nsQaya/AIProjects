@@ -65,6 +65,7 @@ function settingsActions(overrides: Partial<SettingsActions> = {}): SettingsActi
     onDeleteInstrument: vi.fn(() => Promise.resolve()),
     onDeleteInvestmentType: vi.fn(() => Promise.resolve()),
     onLogout: vi.fn(() => Promise.resolve()),
+    onChangePassword: vi.fn(() => Promise.resolve()),
     onSaveCategory: vi.fn(() => Promise.resolve()),
     onSaveCostCenter: vi.fn(() => Promise.resolve()),
     onSaveInstrument: vi.fn(() => Promise.resolve()),
@@ -75,6 +76,33 @@ function settingsActions(overrides: Partial<SettingsActions> = {}): SettingsActi
 }
 
 describe("SettingsPage category management", () => {
+  it("changes the password from the profile security dialog", async () => {
+    const user = userEvent.setup();
+    const onChangePassword = vi.fn(() => Promise.resolve());
+
+    render(
+      <SettingsPage
+        model={settingsModel()}
+        actions={settingsActions({ onChangePassword })}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Şifreyi değiştir" }));
+    const dialog = screen.getByRole("dialog", { name: "Şifreyi değiştir" });
+    await user.type(screen.getByLabelText("Mevcut şifre"), "EskiGucluSifre123!");
+    await user.type(screen.getByLabelText("Yeni şifre"), "YeniGucluSifre123!");
+    await user.type(screen.getByLabelText("Yeni şifre tekrarı"), "YeniGucluSifre123!");
+    await user.click(screen.getByRole("button", { name: "Şifreyi güncelle" }));
+
+    await waitFor(() =>
+      expect(onChangePassword).toHaveBeenCalledWith({
+        currentPassword: "EskiGucluSifre123!",
+        newPassword: "YeniGucluSifre123!",
+      }),
+    );
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
+  });
+
   it("creates a category and closes only after the callback succeeds", async () => {
     const user = userEvent.setup();
     const onSaveCategory = vi.fn(() => Promise.resolve());

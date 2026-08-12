@@ -31,6 +31,7 @@ app.get("/health", (c) => c.json({ status: "ok" }));
 app.get("/health/ready", async (c) => {
   const secretBytes = new TextEncoder().encode(c.env.JWT_SECRET || "").byteLength;
   const pepperBytes = new TextEncoder().encode(c.env.REFRESH_TOKEN_PEPPER || "").byteLength;
+  const passwordResetPepperBytes = new TextEncoder().encode(c.env.PASSWORD_RESET_TOKEN_PEPPER || "").byteLength;
   try {
     const result = await withDatabase(c.env, (client) => client.query<{
       migration_count: number;
@@ -41,22 +42,24 @@ app.get("/health/ready", async (c) => {
       (SELECT COUNT(*)::int FROM schema_migrations) AS migration_count,
       to_regclass('public.users') IS NOT NULL AND to_regclass('public.transactions') IS NOT NULL
         AND to_regclass('public.cost_centers') IS NOT NULL
+        AND to_regclass('public.password_reset_tokens') IS NOT NULL
         AND to_regclass('public.investment_lots') IS NOT NULL AS schema_ready,
       has_table_privilege(current_user,'public.users','SELECT,INSERT')
         AND has_table_privilege(current_user,'public.transactions','SELECT,INSERT,UPDATE,DELETE')
         AND has_table_privilege(current_user,'public.cost_centers','SELECT,INSERT,UPDATE,DELETE')
+        AND has_table_privilege(current_user,'public.password_reset_tokens','SELECT,INSERT,UPDATE,DELETE')
         AND has_table_privilege(current_user,'public.investment_lots','SELECT,INSERT,UPDATE,DELETE') AS tables_ready,
       has_sequence_privilege(current_user,'public.transaction_number_seq','USAGE') AS sequence_ready`));
     const checks = result.rows[0]!;
-    const ready = checks.migration_count === 14 && checks.schema_ready && checks.tables_ready
-      && checks.sequence_ready && secretBytes >= 32 && pepperBytes >= 32;
+    const ready = checks.migration_count === 15 && checks.schema_ready && checks.tables_ready
+      && checks.sequence_ready && secretBytes >= 32 && pepperBytes >= 32 && passwordResetPepperBytes >= 32;
     return c.json({ status: ready ? "ready" : "not_ready", checks: {
       database: true,
-      migrations: checks.migration_count === 14,
+      migrations: checks.migration_count === 15,
       schema: checks.schema_ready,
       tablePrivileges: checks.tables_ready,
       sequencePrivileges: checks.sequence_ready,
-      authSecrets: secretBytes >= 32 && pepperBytes >= 32
+      authSecrets: secretBytes >= 32 && pepperBytes >= 32 && passwordResetPepperBytes >= 32
     } }, ready ? 200 : 503);
   } catch (error) {
     const code = typeof error === "object" && error && "code" in error ? String(error.code) : "DB_UNAVAILABLE";

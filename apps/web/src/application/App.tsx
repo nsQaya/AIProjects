@@ -1,7 +1,8 @@
-import { HashRouter } from "react-router-dom";
+import { HashRouter, Route, Routes } from "react-router-dom";
 
 import { AuthPage } from "../auth/AuthPage";
 import { AuthProvider, useAuth } from "../auth/AuthProvider";
+import { ResetPasswordPage } from "../auth/ResetPasswordPage";
 import type { APIClient } from "../platform/api/api-client";
 import { FinanceProvider } from "../providers/FinanceProvider";
 import { AuthenticatedApp } from "./AuthenticatedApp";
@@ -23,7 +24,10 @@ export function App({ api }: { api: APIClient }) {
     <HashRouter>
       <AuthProvider api={api}>
         <ToastProvider>
-          <AuthGate />
+          <Routes>
+            <Route path="/reset-password" element={<ResetPasswordPage />} />
+            <Route path="*" element={<AuthGate />} />
+          </Routes>
         </ToastProvider>
       </AuthProvider>
     </HashRouter>

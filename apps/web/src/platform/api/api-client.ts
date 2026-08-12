@@ -1,14 +1,19 @@
 import type { ZodType } from "zod";
 import {
+  forgotPasswordResponseSchema,
   loginResponseSchema,
   refreshResponseSchema,
   registerResponseSchema,
   type AuthSession,
+  type ChangePasswordInput,
+  type ForgotPasswordInput,
+  type ForgotPasswordResponse,
   type LoginInput,
   type LoginResponse,
   type RefreshResponse,
   type RegisterInput,
   type RegisterResponse,
+  type ResetPasswordInput,
 } from "../auth/auth-schemas";
 import type { SessionPersistence } from "../auth/session-store";
 import { APIError, apiErrorFromResponse } from "./api-error";
@@ -142,6 +147,37 @@ export class APIClient {
     });
     this.setSession(data);
     return data;
+  }
+
+  async forgotPassword(payload: ForgotPasswordInput): Promise<ForgotPasswordResponse> {
+    return this.request("/api/v1/auth/forgot-password", {
+      method: "POST",
+      body: payload,
+      auth: false,
+      schema: forgotPasswordResponseSchema,
+    });
+  }
+
+  async resetPassword(payload: ResetPasswordInput): Promise<void> {
+    await this.request<null>("/api/v1/auth/reset-password", {
+      method: "POST",
+      body: payload,
+      auth: false,
+    });
+  }
+
+  async changePassword(payload: ChangePasswordInput): Promise<void> {
+    const current = this.#session;
+    if (!current) {
+      throw new APIError(401, "AUTH_REQUIRED", "Şifre değiştirmek için giriş yapmalısınız");
+    }
+
+    const tokens = await this.request("/api/v1/me/password", {
+      method: "PATCH",
+      body: payload,
+      schema: refreshResponseSchema,
+    });
+    this.setSession({ ...current, ...tokens, user: current.user });
   }
 
   async logout(): Promise<void> {
