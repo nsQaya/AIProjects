@@ -1,6 +1,8 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { CategoryDTO, CostCenterDTO } from "@defterx/contracts";
+import type {
+  CategoryDTO,CostCenterDTO,CurrencyDTO,InvestmentAssetTypeDTO,InvestmentInstrumentDTO,MarketPriceSyncRunDTO,
+} from "@defterx/contracts";
 import { describe, expect, it, vi } from "vitest";
 
 import { SettingsPage } from "./SettingsPage";
@@ -38,6 +40,28 @@ const inactiveCostCenter: CostCenterDTO = {
   version: 5,
 };
 
+const investmentType:InvestmentAssetTypeDTO={
+  id:"type-1",bookId:"book-1",name:"Hisse",icon:null,isSystem:true,isActive:true,sortOrder:1,version:1,
+};
+
+const linkedInstrument:InvestmentInstrumentDTO={
+  id:"instrument-1",bookId:"book-1",assetTypeId:"type-1",assetTypeName:"Hisse",name:"Apple Inc.",
+  symbol:"AAPL",marketSymbolId:"market-aapl",providerSymbol:"AAPL",currencyCode:"USD",isActive:true,
+  version:1,latestPrice:null,latestPriceAt:null,
+};
+
+const completedRun:MarketPriceSyncRunDTO={
+  id:"run-1",kind:"PRICES",targetDate:"2026-08-14",status:"COMPLETED",totalItems:2,processedItems:2,
+  updatedItems:1,missingItems:1,failedItems:0,startedAt:"2026-08-14T20:00:00Z",
+  completedAt:"2026-08-14T20:01:00Z",createdAt:"2026-08-14T20:00:00Z",
+};
+
+const currencies: readonly CurrencyDTO[] = [
+  { code: "TRY", nameTr: "TÜRK LİRASI", nameEn: "TURKISH LIRA", isEnabled: true },
+  { code: "USD", nameTr: "ABD DOLARI", nameEn: "US DOLLAR", isEnabled: true },
+  { code: "EUR", nameTr: "EURO", nameEn: "EURO", isEnabled: false },
+];
+
 function settingsModel(
   categories: readonly CategoryDTO[] = [category],
   costCenters: readonly CostCenterDTO[] = [],
@@ -48,6 +72,7 @@ function settingsModel(
     book: { name: "Kişisel Defter", baseCurrency: "TRY" },
     categories,
     costCenters,
+    currencies,
     instruments: [],
     investmentTypes: [],
     user: { displayName: "Nihat Kaya", email: "nihat@example.test" },
@@ -71,6 +96,15 @@ function settingsActions(overrides: Partial<SettingsActions> = {}): SettingsActi
     onSaveInstrument: vi.fn(() => Promise.resolve()),
     onSaveInstrumentPrice: vi.fn(() => Promise.resolve()),
     onSaveInvestmentType: vi.fn(() => Promise.resolve()),
+    onSearchMarketSymbols: vi.fn(() => Promise.resolve([])),
+    onLoadInstrumentPrices: vi.fn(() => Promise.resolve([])),
+    onSyncMarketPrices: vi.fn(() => Promise.reject(new Error("unused"))),
+    onMarketPriceSyncStatus: vi.fn(() => Promise.resolve(null)),
+    onEnableCurrency: vi.fn(() => Promise.resolve()),
+    onDisableCurrency: vi.fn(() => Promise.resolve()),
+    onLoadCurrencyRates: vi.fn(() => Promise.resolve([])),
+    onSyncCurrencyRates: vi.fn(() => Promise.reject(new Error("unused"))),
+    onCurrencyRateSyncStatus: vi.fn(() => Promise.resolve(null)),
     ...overrides,
   };
 }
@@ -311,5 +345,92 @@ describe("SettingsPage cost center management", () => {
         version: inactiveCostCenter.version,
       });
     });
+  });
+});
+
+describe("SettingsPage automatic market prices",()=>{
+  it("shows a missing selected-day price as zero and queues a whole-market refresh",async()=>{
+    const user=userEvent.setup();
+    const onSyncMarketPrices=vi.fn(()=>Promise.resolve(completedRun));
+    render(<SettingsPage model={{...settingsModel(),instruments:[linkedInstrument],investmentTypes:[investmentType]}} actions={settingsActions({
+      onLoadInstrumentPrices:vi.fn(()=>Promise.resolve([{instrumentId:"instrument-1",priceDate:"2026-08-14",price:"0",available:false,source:"MISSING" as const}])),
+      onSyncMarketPrices,
+    })}/>);
+    expect(await screen.findByText(/O gün fiyat yok/)).toHaveTextContent("0,00");
+    await user.click(screen.getByRole("button",{name:"Fiyatı güncelle"}));
+    await waitFor(()=>expect(onSyncMarketPrices).toHaveBeenCalledWith(expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/)));
+  });
+
+  it("selects a searchable Yahoo code while defining an instrument",async()=>{
+    const user=userEvent.setup();
+    const onSaveInstrument=vi.fn(()=>Promise.resolve());
+    const onSearchMarketSymbols=vi.fn(()=>Promise.resolve([{
+      id:"market-aapl",providerSymbol:"AAPL",exchangeCode:"NASDAQ",market:"US" as const,
+      instrumentType:"EQUITY" as const,name:"Apple Inc.",currencyCode:"USD" as const,
+    }]));
+    render(<SettingsPage model={{...settingsModel(),investmentTypes:[investmentType]}} actions={settingsActions({
+      onSaveInstrument,onSearchMarketSymbols,
+    })}/>);
+    await user.click(screen.getByRole("button",{name:"+ Araç"}));
+    await user.selectOptions(screen.getByLabelText("Tür"),"type-1");
+    await user.type(screen.getByLabelText("Borsa kodu ara"),"AAPL");
+    await waitFor(()=>expect(screen.getByRole("option",{name:/AAPL · Apple Inc\./})).toBeInTheDocument());
+    await user.selectOptions(screen.getByLabelText(/^Yahoo Finance kodu/),"market-aapl");
+    expect(screen.getByLabelText("Sembol")).toHaveValue("AAPL");
+    expect(screen.getByLabelText("Ad")).toHaveValue("Apple Inc.");
+    await user.click(screen.getByRole("button",{name:"Kaydet"}));
+    await waitFor(()=>expect(onSaveInstrument).toHaveBeenCalledWith(expect.objectContaining({
+      mode:"create",marketSymbolId:"market-aapl",symbol:"AAPL",name:"Apple Inc.",
+    })));
+  });
+});
+
+describe("SettingsPage currency management",()=>{
+  it("adds and removes a currency and shows its TCMB rate for the selected date",async()=>{
+    const user=userEvent.setup();
+    const onEnableCurrency=vi.fn(()=>Promise.resolve());
+    const onDisableCurrency=vi.fn(()=>Promise.resolve());
+    const confirmAction=vi.fn(()=>true);
+    const { container }=render(
+      <SettingsPage
+        model={settingsModel()}
+        actions={settingsActions({
+          onEnableCurrency,onDisableCurrency,
+          onLoadCurrencyRates:vi.fn(()=>Promise.resolve([
+            {currencyCode:"USD",rateDate:"2026-08-14",tryRate:"47.8293",available:true,source:"TCMB" as const},
+          ])),
+        })}
+        confirmAction={confirmAction}
+      />,
+    );
+
+    expect(await screen.findByText(/47,8293/)).toBeInTheDocument();
+    expect(container.querySelector('[data-enable-currency="EUR"]')).toBeInTheDocument();
+    expect(container.querySelector('[data-disable-currency="TRY"]')).not.toBeInTheDocument();
+
+    await user.click(container.querySelector<HTMLButtonElement>('[data-enable-currency="EUR"]')!);
+    await waitFor(()=>expect(onEnableCurrency).toHaveBeenCalledWith("EUR"));
+
+    await user.click(container.querySelector<HTMLButtonElement>('[data-disable-currency="USD"]')!);
+    await waitFor(()=>expect(onDisableCurrency).toHaveBeenCalledWith("USD"));
+    expect(confirmAction).toHaveBeenCalledWith(expect.stringContaining("ABD DOLARI"));
+  });
+
+  it("offers only TRY and enabled currencies when defining a manual instrument",async()=>{
+    const user=userEvent.setup();
+    const onSaveInstrument=vi.fn(()=>Promise.resolve());
+    render(<SettingsPage model={{...settingsModel(),investmentTypes:[investmentType]}} actions={settingsActions({
+      onSaveInstrument,
+    })}/>);
+    await user.click(screen.getByRole("button",{name:"+ Araç"}));
+    await user.selectOptions(screen.getByLabelText("Tür"),"type-1");
+    const currencySelect=screen.getByLabelText("Para birimi");
+    expect([...(currencySelect as HTMLSelectElement).options].map((option)=>option.value)).toEqual(["TRY","USD"]);
+    await user.selectOptions(currencySelect,"USD");
+    await user.type(screen.getByLabelText("Ad"),"Yurt dışı fon");
+    await user.click(screen.getByRole("button",{name:"Kaydet"}));
+    await waitFor(()=>expect(onSaveInstrument).toHaveBeenCalledWith(expect.objectContaining({
+      mode:"create",currencyCode:"USD",name:"Yurt dışı fon",
+    })));
   });
 });

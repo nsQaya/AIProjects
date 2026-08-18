@@ -2,7 +2,7 @@ import { useState, type CSSProperties } from "react";
 
 import { Button, InlineFeedback } from "../../components/ui";
 import { errorMessage } from "../../lib/error-message";
-import { dateText, money, toNumber } from "../../lib/format";
+import { dateText, money, moneyInCurrency, toNumber } from "../../lib/format";
 import { isPositiveDecimal } from "./decimal";
 import { LotDialog, SaleDialog } from "./InvestmentDialogs";
 import type {
@@ -41,9 +41,12 @@ export function InvestmentsPage({
   const [dialog, setDialog] = useState<InvestmentDialogState | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
-  const cost = portfolio.reduce((sum, item) => sum + toNumber(item.costBasis), 0);
+  // costBasisTRY/currentValueTRY are already normalized to TRY (equal to the
+  // plain fields for TRY instruments); a foreign-currency instrument with no
+  // TCMB rate yet contributes 0 here rather than mixing units into the total.
+  const cost = portfolio.reduce((sum, item) => sum + toNumber(item.costBasisTRY), 0);
   const value = portfolio.reduce(
-    (sum, item) => sum + toNumber(item.currentValue ?? item.costBasis),
+    (sum, item) => sum + toNumber(item.currentValueTRY ?? item.costBasisTRY),
     0,
   );
   const gain = value - cost;
@@ -147,14 +150,21 @@ export function InvestmentsPage({
                   <small>{item.symbol || item.currencyCode}</small>
                   <h3>{item.name}</h3>
                 </div>
-                <strong>{money(item.currentValue ?? item.costBasis)}</strong>
-                <small>{item.quantity} adet · Ort. maliyet {money(averageCost)}</small>
+                <strong>{moneyInCurrency(item.currentValue ?? item.costBasis, item.currencyCode)}</strong>
+                {item.currencyCode !== "TRY" ? (
+                  <small>
+                    {item.currentValueTRY !== null
+                      ? `≈ ${money(item.currentValueTRY)}`
+                      : "TL karşılığı için kur bekleniyor"}
+                  </small>
+                ) : null}
+                <small>{item.quantity} adet · Ort. maliyet {moneyInCurrency(averageCost, item.currencyCode)}</small>
                 <b className={itemGain < 0 ? "expense" : "income"}>
                   {item.latestPrice !== null ? (
                     <>
-                      Son fiyat {money(item.latestPrice)}
+                      Son fiyat {moneyInCurrency(item.latestPrice, item.currencyCode)}
                       {item.latestPriceAt ? ` · ${dateText(item.latestPriceAt)}` : ""}
-                      {" · "}{itemGain >= 0 ? "+" : ""}{money(item.gain ?? "0")}
+                      {" · "}{itemGain >= 0 ? "+" : ""}{moneyInCurrency(item.gain ?? "0", item.currencyCode)}
                       {item.gainPercent !== null ? ` (%${toNumber(item.gainPercent).toFixed(2)})` : ""}
                     </>
                   ) : (
@@ -190,10 +200,10 @@ export function InvestmentsPage({
                   <span><b>{item.instrumentName}</b></span>
                   <span>{dateText(item.soldAt)}</span>
                   <span>{item.quantity}</span>
-                  <span>{money(item.unitPrice)}</span>
+                  <span>{moneyInCurrency(item.unitPrice, item.currencyCode)}</span>
                   <span>{item.destinationAccountName}</span>
                   <strong className={toNumber(item.gain) < 0 ? "expense" : "income"}>
-                    {toNumber(item.gain) >= 0 ? "+" : ""}{money(item.gain)}
+                    {toNumber(item.gain) >= 0 ? "+" : ""}{moneyInCurrency(item.gain, item.currencyCode)}
                   </strong>
                   <span className="row-actions">
                     <button
@@ -243,8 +253,8 @@ export function InvestmentsPage({
                   <span><b>{item.instrumentName}</b></span>
                   <span>{dateText(item.purchasedAt)}</span>
                   <span>{item.quantity}</span>
-                  <span>{money(item.unitPrice)}</span>
-                  <strong>{money(item.costBasis)}</strong>
+                  <span>{moneyInCurrency(item.unitPrice, item.currencyCode)}</span>
+                  <strong>{moneyInCurrency(item.costBasis, item.currencyCode)}</strong>
                   <span className="row-actions">
                     <button
                       type="button"

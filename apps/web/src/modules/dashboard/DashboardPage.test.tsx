@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import type { CashFlowRange, CashFlowVisibility } from "../../finance";
@@ -102,6 +102,65 @@ function snapshot(): DashboardSnapshot {
   };
 }
 
+function dayAtOffset(offset: number): string {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() + offset);
+  return date.toISOString().slice(0, 10);
+}
+
+function recentTransaction(id: string, title: string, dayOffset: number, amount: string) {
+  const date = dayAtOffset(dayOffset);
+  return {
+    id,
+    type: "EXPENSE" as const,
+    title,
+    transactionDate: `${date}T12:00:00.000Z`,
+    currencyCode: "TRY" as const,
+    amount,
+    ui: { amount: Number(amount), date },
+  };
+}
+
+function upcomingTransaction(
+  id: string,
+  title: string,
+  dayOffset: number,
+  transactionType: "INCOME" | "EXPENSE",
+  amount: string,
+): DashboardSnapshot["upcoming"][number] {
+  const date = dayAtOffset(dayOffset);
+  return {
+    id,
+    bookId: "00000000-0000-4000-8000-000000000010",
+    accountId: ACCOUNT_ONE,
+    targetAccountId: null,
+    transactionType,
+    categoryId: null,
+    costCenterId: null,
+    costCenterName: null,
+    contactId: null,
+    title,
+    amount,
+    currencyCode: "TRY",
+    scheduledAt: `${date}T12:00:00.000Z`,
+    reminderAt: null,
+    status: "PENDING",
+    seriesId: null,
+    recurrenceFrequency: null,
+    recurrenceInterval: null,
+    recurrenceEndAt: null,
+    completedTransactionId: null,
+    version: 1,
+    ui: {
+      kind: transactionType.toLowerCase() as "income" | "expense",
+      date,
+      amount: Number(amount),
+      categoryName: "",
+      costCenterName: "",
+    },
+  };
+}
+
 function pageCallbacks() {
   const onCashflowRangeChange = vi.fn<(range: CashFlowRange) => Promise<unknown>>();
   const onCashflowAccountsChange = vi.fn<(accountIds: readonly string[]) => Promise<unknown>>();
@@ -150,17 +209,21 @@ describe("DashboardPage", () => {
     const callbacks = pageCallbacks();
     render(<DashboardPage snapshot={snapshot()} {...callbacks} />);
 
-    for (const label of ["1 ay", "3 ay", "6 ay", "Yıl başı", "1 yıl", "5 yıl", "10 yıl"]) {
-      expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
-    }
-    expect(screen.getByRole("button", { name: "6 ay" })).toHaveAttribute("aria-pressed", "true");
+    const rangeSwitch = within(
+      screen.getByRole("group", { name: "Nakit akışı tarih aralığı" }),
+    );
 
-    await user.click(screen.getByRole("button", { name: "1 ay" }));
-    await user.click(screen.getByRole("button", { name: "3 ay" }));
-    await user.click(screen.getByRole("button", { name: "Yıl başı" }));
-    await user.click(screen.getByRole("button", { name: "1 yıl" }));
-    await user.click(screen.getByRole("button", { name: "5 yıl" }));
-    await user.click(screen.getByRole("button", { name: "10 yıl" }));
+    for (const label of ["1 ay", "3 ay", "6 ay", "Yıl başı", "1 yıl", "5 yıl", "10 yıl"]) {
+      expect(rangeSwitch.getByRole("button", { name: label })).toBeInTheDocument();
+    }
+    expect(rangeSwitch.getByRole("button", { name: "6 ay" })).toHaveAttribute("aria-pressed", "true");
+
+    await user.click(rangeSwitch.getByRole("button", { name: "1 ay" }));
+    await user.click(rangeSwitch.getByRole("button", { name: "3 ay" }));
+    await user.click(rangeSwitch.getByRole("button", { name: "Yıl başı" }));
+    await user.click(rangeSwitch.getByRole("button", { name: "1 yıl" }));
+    await user.click(rangeSwitch.getByRole("button", { name: "5 yıl" }));
+    await user.click(rangeSwitch.getByRole("button", { name: "10 yıl" }));
 
     expect(callbacks.onCashflowRangeChange.mock.calls.map(([range]) => range)).toEqual([
       "1M",
@@ -172,13 +235,85 @@ describe("DashboardPage", () => {
     ]);
   });
 
+  it("filters upcoming and recent cards independently and recalculates expected net", async () => {
+    const user = userEvent.setup();
+    const data = snapshot();
+    const callbacks = pageCallbacks();
+    data.upcoming = [
+      upcomingTransaction(
+        "00000000-0000-4000-8000-000000000020",
+        "Yakın gelir",
+        10,
+        "INCOME",
+        "100",
+      ),
+      upcomingTransaction(
+        "00000000-0000-4000-8000-000000000021",
+        "Uzak gider",
+        45,
+        "EXPENSE",
+        "30",
+      ),
+    ];
+    data.dashboard = {
+      ...data.dashboard,
+      recentTransactions: [
+        recentTransaction(
+          "00000000-0000-4000-8000-000000000030",
+          "Yakın işlem",
+          -10,
+          "20",
+        ),
+        recentTransaction(
+          "00000000-0000-4000-8000-000000000031",
+          "Eski işlem",
+          -45,
+          "40",
+        ),
+      ],
+    };
+
+    const { container } = render(
+      <DashboardPage snapshot={data} {...callbacks} />,
+    );
+    const upcomingRanges = within(
+      screen.getByRole("group", { name: "Yaklaşan tarih aralığı" }),
+    );
+    const recentRanges = within(
+      screen.getByRole("group", { name: "Son işlemler tarih aralığı" }),
+    );
+
+    for (const label of ["1 ay", "3 ay", "6 ay", "Yıl başı", "1 yıl", "5 yıl", "10 yıl"]) {
+      expect(upcomingRanges.getByRole("button", { name: label })).toBeInTheDocument();
+      expect(recentRanges.getByRole("button", { name: label })).toBeInTheDocument();
+    }
+    expect(screen.getByText("Yakın gelir")).toBeInTheDocument();
+    expect(screen.queryByText("Uzak gider")).not.toBeInTheDocument();
+    expect(screen.getByText("Yakın işlem")).toBeInTheDocument();
+    expect(screen.queryByText("Eski işlem")).not.toBeInTheDocument();
+    expect(container.querySelector(".upcoming-total strong")).toHaveTextContent(money(100));
+
+    await user.click(upcomingRanges.getByRole("button", { name: "3 ay" }));
+
+    expect(screen.getByText("Uzak gider")).toBeInTheDocument();
+    expect(screen.queryByText("Eski işlem")).not.toBeInTheDocument();
+    expect(container.querySelector(".upcoming-total strong")).toHaveTextContent(money(70));
+
+    await user.click(recentRanges.getByRole("button", { name: "3 ay" }));
+
+    expect(screen.getByText("Eski işlem")).toBeInTheDocument();
+    expect(callbacks.onCashflowRangeChange).not.toHaveBeenCalled();
+  });
+
   it("renders an async cash-flow failure inside the panel", async () => {
     const user = userEvent.setup();
     const callbacks = pageCallbacks();
     callbacks.onCashflowRangeChange.mockRejectedValueOnce(new Error("Aralık yüklenemedi."));
     render(<DashboardPage snapshot={snapshot()} {...callbacks} />);
 
-    await user.click(screen.getByRole("button", { name: "1 ay" }));
+    await user.click(within(
+      screen.getByRole("group", { name: "Nakit akışı tarih aralığı" }),
+    ).getByRole("button", { name: "1 ay" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Aralık yüklenemedi.");
   });

@@ -74,13 +74,11 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
   const refreshPreservingFilters = useCallback(async () => {
     const before = service.getSnapshot();
     const transactionFilter = before.transactionFilter;
-    const reportRange = before.reportRange;
+    // service.refresh() already re-fetches report analytics using the current
+    // explicit range (or a fresh default window when none was set), so no
+    // separate report follow-up is needed here.
     await service.refresh();
-
-    const followUps: Array<Promise<unknown>> = [];
-    if (hasTransactionFilter(before)) followUps.push(service.loadTransactions(transactionFilter));
-    if (reportRange.from || reportRange.to) followUps.push(service.loadIncomeExpenseReport(reportRange));
-    await Promise.all(followUps);
+    if (hasTransactionFilter(before)) await service.loadTransactions(transactionFilter);
   }, [service]);
 
   const refresh = useCallback(async () => {

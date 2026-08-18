@@ -4,9 +4,11 @@ import type { ClientTransactionType, ScheduledTransactionType } from "@defterx/c
 import { InlineFeedback } from "../../components/ui";
 import { Icon } from "../../components/ui/Icon";
 import type { CashFlowRange } from "../../finance";
+import { today } from "../../lib/date";
 import { errorMessage } from "../../lib/error-message";
 import { dateText, money, signedMoney } from "../../lib/format";
 import { CashFlowChart } from "./CashFlowChart";
+import { dateIsInWindow, recentDateWindow, upcomingDateWindow } from "./dashboard-range";
 import type { DashboardPageProps } from "./dashboard-types";
 
 const RANGE_LABELS: Readonly<Record<CashFlowRange, string>> = {
@@ -46,6 +48,33 @@ function EmptyState({ children }: { children: string }) {
   return <div className="empty-state">{children}</div>;
 }
 
+interface ActivityRangeSwitchProps {
+  label: string;
+  onChange: (range: CashFlowRange) => void;
+  range: CashFlowRange;
+  section: "upcoming" | "recent";
+}
+
+function ActivityRangeSwitch({ label, onChange, range, section }: ActivityRangeSwitchProps) {
+  return (
+    <div className="range-switch dashboard-card-range" role="group" aria-label={label}>
+      {RANGE_ORDER.map((value) => (
+        <button
+          type="button"
+          key={value}
+          data-dashboard-range={section}
+          data-range-value={value}
+          className={range === value ? "active" : undefined}
+          aria-pressed={range === value}
+          onClick={() => onChange(value)}
+        >
+          {RANGE_LABELS[value]}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function DashboardPage({
   busy = false,
   snapshot,
@@ -56,6 +85,8 @@ export function DashboardPage({
   const [cashflowError, setCashflowError] = useState("");
   const [rangePending, setRangePending] = useState(false);
   const [accountsPending, setAccountsPending] = useState(false);
+  const [upcomingRange, setUpcomingRange] = useState<CashFlowRange>("1M");
+  const [recentRange, setRecentRange] = useState<CashFlowRange>("1M");
   const [accountIntent, setAccountIntent] = useState<{
     base: readonly string[];
     selected: readonly string[];
@@ -67,6 +98,13 @@ export function DashboardPage({
   const netBalance = activeAccounts.reduce((sum, account) => sum + account.ui.displayBalance, 0);
   const openUpcoming = snapshot.upcoming.filter(
     (item) => item.status === "PENDING" || item.status === "OVERDUE",
+  );
+  const referenceDay = today();
+  const filteredUpcoming = openUpcoming.filter((item) =>
+    dateIsInWindow(item.scheduledAt, upcomingDateWindow(upcomingRange, referenceDay)),
+  );
+  const filteredRecentTransactions = snapshot.dashboard.recentTransactions.filter((item) =>
+    dateIsInWindow(item.transactionDate, recentDateWindow(recentRange, referenceDay)),
   );
   const income = snapshot.dashboard.ui.income;
   const expense = snapshot.dashboard.ui.expense;
@@ -159,7 +197,7 @@ export function DashboardPage({
               <h2>Nakit akışı</h2>
               <p>{RANGE_LABELS[snapshot.cashflowRange]} için gelir, gider ve dönem sonu bakiyesi</p>
             </div>
-            <div className="range-switch" aria-label="Nakit akışı tarih aralığı">
+            <div className="range-switch" role="group" aria-label="Nakit akışı tarih aralığı">
               {RANGE_ORDER.map((range) => (
                 <button
                   type="button"
@@ -193,8 +231,14 @@ export function DashboardPage({
             <div><h2>Yaklaşan</h2><p>Ödeme ve tahsilatlar</p></div>
             <a href="#/upcoming">Tümünü gör <Icon name="arrow" /></a>
           </header>
+          <ActivityRangeSwitch
+            label="Yaklaşan tarih aralığı"
+            range={upcomingRange}
+            section="upcoming"
+            onChange={setUpcomingRange}
+          />
           <div className="upcoming-list">
-            {openUpcoming.length > 0 ? openUpcoming.slice(0, 5).map((item) => {
+            {filteredUpcoming.length > 0 ? filteredUpcoming.slice(0, 5).map((item) => {
               const kind = scheduledKind(item.transactionType);
               return (
                 <div className="upcoming-row" key={item.id}>
@@ -213,7 +257,7 @@ export function DashboardPage({
           </div>
           <div className="upcoming-total">
             <span>Beklenen net</span>
-            <strong>{money(openUpcoming.reduce(
+            <strong>{money(filteredUpcoming.reduce(
               (sum, item) => sum + expectedImpact(item.transactionType, item.ui.amount),
               0,
             ))}</strong>
@@ -226,12 +270,18 @@ export function DashboardPage({
           <div><h2>Son işlemler</h2><p>Canlı defter hareketleri</p></div>
           <a href="#/transactions">Tüm işlemler <Icon name="arrow" /></a>
         </header>
+        <ActivityRangeSwitch
+          label="Son işlemler tarih aralığı"
+          range={recentRange}
+          section="recent"
+          onChange={setRecentRange}
+        />
         <div className="transaction-table">
           <div className="table-head">
             <span>İşlem</span><span>Kategori</span><span>Hesap</span><span>Tarih</span><span>Tutar</span>
           </div>
-          {snapshot.dashboard.recentTransactions.length > 0 ? (
-            snapshot.dashboard.recentTransactions.slice(0, 5).map((summary) => {
+          {filteredRecentTransactions.length > 0 ? (
+            filteredRecentTransactions.slice(0, 5).map((summary) => {
               const detail = transactionById.get(summary.id);
               const rawKind = summary.type.toLowerCase();
               const kind = transactionKind(summary.type);

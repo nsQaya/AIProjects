@@ -11,6 +11,8 @@ import {
   updateCostCenter,
 } from "../../src/modules/cost-centers/cost-center.service";
 import { loadIncomeExpenseReport } from "../../src/modules/reports/report.routes";
+import { loadReportAnalytics } from "../../src/modules/reports/report.analytics";
+import { listBookInstrumentPrices,processSplitBatch } from "../../src/modules/market-data/market-data.service";
 import {
   createScheduled,
   listScheduled,
@@ -177,6 +179,17 @@ suite("PostgreSQL cost-center integration",()=>{
       isActive:true,
       amount:"-125.000000",
     }));
+    const scoped = await loadIncomeExpenseReport(
+      pool,bookId,"2026-01-01T00:00:00.000Z","2026-12-31T23:59:59.999Z",[cashId],false,
+    );
+    expect(scoped.costCenters).toContainEqual(expect.objectContaining({
+      id:center.id,
+      amount:"-125.000000",
+    }));
+    const excluded = await loadIncomeExpenseReport(
+      pool,bookId,"2026-01-01T00:00:00.000Z","2026-12-31T23:59:59.999Z",[otherBookId],false,
+    );
+    expect(excluded.costCenters).not.toContainEqual(expect.objectContaining({id:center.id}));
     expect(await deleteOrDeactivateCostCenter(pool,userId,center.id,center.version)).toMatchObject({
       id:center.id,
       isActive:false,
@@ -198,6 +211,69 @@ suite("PostgreSQL cost-center integration",()=>{
       isActive:false,
       amount:"0.000000",
     }));
+  });
+
+  it("executes the complete analytics suite against PostgreSQL",async()=>{
+    await createScheduled(pool,userId,{
+      bookId,
+      accountId:cashId,
+      transactionType:"EXPENSE",
+      categoryId:expenseCategoryId,
+      title:"Planned analytics expense",
+      amount:"75",
+      currencyCode:"TRY",
+      scheduledAt:"2026-09-15T12:00:00.000Z",
+    });
+    const assetType=await pool.query<{id:string}>(
+      `INSERT INTO investment_asset_types(book_id,name) VALUES($1,'Analytics Fund') RETURNING id`,
+      [bookId],
+    );
+    const instrument=await pool.query<{id:string}>(
+      `INSERT INTO investment_instruments(book_id,asset_type_id,name,symbol,currency_code)
+       VALUES($1,$2,'Analytics Instrument','ANL','TRY') RETURNING id`,
+      [bookId,assetType.rows[0]!.id],
+    );
+    await pool.query(
+      `INSERT INTO investment_lots(book_id,instrument_id,account_id,quantity,unit_price,purchased_at)
+       VALUES($1,$2,$3,10,100,'2026-08-01T12:00:00.000Z')`,
+      [bookId,instrument.rows[0]!.id,cashId],
+    );
+    await pool.query(
+      `INSERT INTO investment_prices(instrument_id,price,priced_at)
+       VALUES($1,125,'2026-08-10T12:00:00.000Z')`,
+      [instrument.rows[0]!.id],
+    );
+    const report=await loadReportAnalytics(pool,{
+      bookId,
+      from:"2026-01-01T00:00:00.000Z",
+      to:"2026-12-31T23:59:59.999Z",
+      accountIds:[cashId],
+      includeAllAccounts:false,
+      granularity:"month",
+    });
+    expect(report).toMatchObject({currencyCode:"TRY",granularity:"month"});
+    expect(report.trend).toHaveLength(12);
+    expect(report.accountBalances.accounts).toContainEqual(expect.objectContaining({id:cashId,name:"Cash"}));
+    expect(Array.isArray(report.categoryDetail.transactions)).toBe(true);
+    expect(report.liquidity.events).toContainEqual(expect.objectContaining({title:"Planned analytics expense",impact:"-75.000000"}));
+    expect(report.netWorth.items).toContainEqual(expect.objectContaining({
+      instrumentId:instrument.rows[0]!.id,
+      currentValue:expect.any(String),
+      unrealizedGain:expect.any(String),
+    }));
+    expect(Number(report.netWorth.investmentValue)).toBe(1250);
+    expect(report.netWorth).toEqual(expect.objectContaining({cashBalance:expect.any(String),totalAssets:expect.any(String)}));
+
+    const allAccounts=await loadReportAnalytics(pool,{
+      bookId,
+      from:"2026-01-01T00:00:00.000Z",
+      to:"2026-12-31T23:59:59.999Z",
+      accountIds:[],
+      includeAllAccounts:true,
+      granularity:"month",
+    });
+    expect(allAccounts.accountBalances.accounts).toContainEqual(expect.objectContaining({id:cashId}));
+    expect(Number(allAccounts.netWorth.investmentValue)).toBe(1250);
   });
 
   it("preserves a deactivated center while realizing its existing scheduled record",async()=>{
@@ -227,5 +303,51 @@ suite("PostgreSQL cost-center integration",()=>{
       costCenterId:center.id,
       costCenterName:"Baba",
     }));
+  });
+
+  it("returns zero for a missing market day and applies each Yahoo split exactly once",async()=>{
+    const type=await pool.query<{id:string}>(
+      `INSERT INTO investment_asset_types(book_id,name) VALUES($1,'Market linked') RETURNING id`,[bookId],
+    );
+    const market=await pool.query<{id:string}>(
+      `INSERT INTO market_symbols(catalog_source,provider_symbol,exchange_code,market,instrument_type,name,currency_code)
+       VALUES('KAP','SPLIT.IS','BIST','BIST','EQUITY','Split Test','TRY') RETURNING id`,
+    );
+    const instrument=await pool.query<{id:string}>(
+      `INSERT INTO investment_instruments(book_id,asset_type_id,name,symbol,currency_code,market_symbol_id)
+       VALUES($1,$2,'Split Test','SPLIT.IS','TRY',$3) RETURNING id`,
+      [bookId,type.rows[0]!.id,market.rows[0]!.id],
+    );
+    await pool.query(
+      `INSERT INTO investment_lots(book_id,instrument_id,quantity,unit_price,purchased_at)
+       VALUES($1,$2,10,100,'2026-08-01T12:00:00Z')`,[bookId,instrument.rows[0]!.id],
+    );
+    await pool.query(
+      `INSERT INTO market_daily_prices(market_symbol_id,price_date,close,currency_code)
+       VALUES($1,'2026-08-10',125,'TRY')`,[market.rows[0]!.id],
+    );
+    expect((await listBookInstrumentPrices(pool,bookId,"2026-08-09")).items).toContainEqual(
+      expect.objectContaining({instrumentId:instrument.rows[0]!.id,price:"0",available:false,source:"MISSING"}),
+    );
+    expect((await listBookInstrumentPrices(pool,bookId,"2026-08-10")).items).toContainEqual(
+      expect.objectContaining({instrumentId:instrument.rows[0]!.id,price:"125.000000",available:true,source:"YAHOO"}),
+    );
+
+    const splitTimestamp=Date.parse("2026-08-15T09:00:00Z")/1000;
+    const fetcher=async()=>new Response(JSON.stringify({chart:{result:[{events:{splits:{
+      [String(splitTimestamp)]:{date:splitTimestamp,numerator:2,denominator:1,splitRatio:"2:1"},
+    }}}],error:null}}),{status:200,headers:{"Content-Type":"application/json"}});
+    const item={id:market.rows[0]!.id,symbol:"SPLIT.IS"};
+    await processSplitBatch(pool,[item],fetcher as typeof fetch);
+    await processSplitBatch(pool,[item],fetcher as typeof fetch);
+    const adjusted=await pool.query<{quantity:string;unit_price:string}>(
+      `SELECT quantity::text,unit_price::text FROM investment_lots WHERE instrument_id=$1`,[instrument.rows[0]!.id],
+    );
+    expect(Number(adjusted.rows[0]!.quantity)).toBe(20);
+    expect(Number(adjusted.rows[0]!.unit_price)).toBe(50);
+    const applications=await pool.query<{count:number}>(
+      `SELECT count(*)::int count FROM investment_split_applications WHERE instrument_id=$1`,[instrument.rows[0]!.id],
+    );
+    expect(applications.rows[0]!.count).toBe(1);
   });
 });

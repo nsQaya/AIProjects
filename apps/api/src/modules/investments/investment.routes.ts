@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { z } from "zod";
 import type { AppEnv } from "../../config/bindings";
 import { AppError } from "../../common/errors";
 import { parseJson } from "../../common/validation";
@@ -12,6 +13,9 @@ import {
   createSale,deleteSale,instrumentBookId,listAssetTypes,listInstruments,listLots,listSales,lotBookId,portfolio,saleBookId,setInstrumentPrice,
   updateAssetType,updateInstrument,updateLot,updateSale,
 } from "./investment.service";
+import {
+  createPriceSyncRun,latestPriceSyncRun,listBookInstrumentPrices,searchMarketSymbols,
+} from "../market-data/market-data.service";
 
 export const investmentRoutes=new Hono<AppEnv>();
 
@@ -25,6 +29,8 @@ function requiredVersion(c:any){
   if(!Number.isInteger(value)||value<1)throw new AppError(422,"INVALID_VERSION","A positive version is required");
   return value;
 }
+const calendarDate=z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value=>!Number.isNaN(Date.parse(`${value}T00:00:00Z`)));
+const priceSyncSchema=z.object({bookId:z.string().uuid(),date:calendarDate});
 
 investmentRoutes.get("/portfolio",async c=>{const {client,bookId}=await queryContext(c);return c.json(await portfolio(client,bookId));});
 investmentRoutes.get("/asset-types",async c=>{const {client,bookId}=await queryContext(c);return c.json(await listAssetTypes(client,bookId,c.req.query("includeInactive")==="true"));});
@@ -33,6 +39,33 @@ investmentRoutes.patch("/asset-types/:id",async c=>{const client=c.get("database
 investmentRoutes.delete("/asset-types/:id",async c=>{const client=c.get("database"),id=c.req.param("id");await requireBookRole(client,await assetTypeBookId(client,id),c.get("user").id,"EDITOR");return c.json(await deleteAssetType(client,c.get("user").id,id,requiredVersion(c)));});
 
 investmentRoutes.get("/instruments",async c=>{const {client,bookId}=await queryContext(c);return c.json(await listInstruments(client,bookId,c.req.query("includeInactive")==="true"));});
+investmentRoutes.get("/market-symbols",async c=>{
+  const client=c.get("database"),query=(c.req.query("q")??"").slice(0,100);
+  const marketValue=c.req.query("market"),market=marketValue==="BIST"||marketValue==="US"?marketValue:undefined;
+  const result=await searchMarketSymbols(client,query,market,Math.min(50,Math.max(1,Number(c.req.query("limit"))||30)));
+  if(result.items.length===0){
+    const catalog=await client.query(`SELECT 1 FROM market_symbols LIMIT 1`);
+    if(!catalog.rowCount)await c.env.JOBS.send({type:"SYNC_MARKET_CATALOG"});
+  }
+  return c.json(result);
+});
+investmentRoutes.get("/prices/by-date",async c=>{
+  const {client,bookId}=await queryContext(c),parsed=calendarDate.safeParse(c.req.query("date"));
+  if(!parsed.success)throw new AppError(422,"INVALID_DATE","A valid price date is required");
+  return c.json(await listBookInstrumentPrices(client,bookId,parsed.data));
+});
+investmentRoutes.get("/prices/sync-status",async c=>{
+  const {client}=await queryContext(c),parsed=calendarDate.safeParse(c.req.query("date"));
+  if(!parsed.success)throw new AppError(422,"INVALID_DATE","A valid price date is required");
+  return c.json({run:await latestPriceSyncRun(client,parsed.data)});
+});
+investmentRoutes.post("/prices/sync",async c=>{
+  const input=await parseJson(c.req.raw,priceSyncSchema),client=c.get("database"),userId=c.get("user").id;
+  await requireBookRole(client,input.bookId,userId,"EDITOR");
+  const run=await createPriceSyncRun(client,input.date,"MANUAL",userId);
+  await c.env.JOBS.send({type:"PLAN_MARKET_PRICES",runId:run.id,targetDate:input.date});
+  return c.json(run,202);
+});
 investmentRoutes.post("/instruments",async c=>{const input=await parseJson(c.req.raw,createInstrumentSchema),client=c.get("database");await requireBookRole(client,input.bookId,c.get("user").id,"EDITOR");return c.json(await createInstrument(client,c.get("user").id,input),201);});
 investmentRoutes.patch("/instruments/:id",async c=>{const client=c.get("database"),id=c.req.param("id");await requireBookRole(client,await instrumentBookId(client,id),c.get("user").id,"EDITOR");return c.json(await updateInstrument(client,c.get("user").id,id,await parseJson(c.req.raw,updateInstrumentSchema)));});
 investmentRoutes.delete("/instruments/:id",async c=>{const client=c.get("database"),id=c.req.param("id");await requireBookRole(client,await instrumentBookId(client,id),c.get("user").id,"EDITOR");return c.json(await deleteInstrument(client,c.get("user").id,id,requiredVersion(c)));});

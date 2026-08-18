@@ -100,6 +100,8 @@ export function SettingsRoute() {
             assetTypeId: input.assetTypeId,
             name: input.name,
             symbol: input.symbol,
+            marketSymbolId: input.marketSymbolId,
+            currencyCode: input.currencyCode,
           }),
           "Yatırım aracı eklendi.",
         );
@@ -109,6 +111,8 @@ export function SettingsRoute() {
             assetTypeId: input.assetTypeId,
             name: input.name,
             symbol: input.symbol,
+            marketSymbolId: input.marketSymbolId,
+            currencyCode: input.currencyCode,
             version: input.version,
           }),
           "Yatırım aracı güncellendi.",
@@ -127,6 +131,27 @@ export function SettingsRoute() {
         "Son fiyat kaydedildi.",
       );
     },
+    onSearchMarketSymbols: async (query,market) => (await service.searchMarketSymbols(query,market)).items,
+    onLoadInstrumentPrices: async (date) => (await service.instrumentPricesAtDate(date)).items,
+    onSyncMarketPrices: async (date) => {
+      const run=await service.syncMarketPrices(date);
+      showToast("Seçili gün için tüm piyasa fiyatları güncelleme kuyruğuna alındı.");
+      return run;
+    },
+    onMarketPriceSyncStatus: (date) => service.marketPriceSyncStatus(date),
+    onEnableCurrency: async (code) => {
+      await mutate(() => service.enableCurrency(code), "Para birimi eklendi.");
+    },
+    onDisableCurrency: async (code) => {
+      await mutate(() => service.disableCurrency(code), "Para birimi kaldırıldı.");
+    },
+    onLoadCurrencyRates: async (date) => (await service.currencyRatesAtDate(date)).items,
+    onSyncCurrencyRates: async (date) => {
+      const run = await service.syncCurrencyRates(date);
+      showToast("Seçili gün için TCMB kurları güncelleme kuyruğuna alındı.");
+      return run;
+    },
+    onCurrencyRateSyncStatus: (date) => service.currencyRateSyncStatus(date),
   };
 
   return (
@@ -138,6 +163,7 @@ export function SettingsRoute() {
         book: snapshot.book,
         categories: snapshot.categories,
         costCenters: snapshot.costCenters,
+        currencies: snapshot.currencies,
         instruments: snapshot.instruments,
         investmentTypes: snapshot.investmentTypes,
         user: snapshot.user,

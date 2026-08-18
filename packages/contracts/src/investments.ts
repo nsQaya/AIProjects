@@ -58,6 +58,8 @@ export interface InvestmentInstrumentDTO {
   assetTypeName: string;
   name: string;
   symbol: string | null;
+  marketSymbolId: UUID | null;
+  providerSymbol: string | null;
   currencyCode: CurrencyCode;
   isActive: boolean;
   version: Version;
@@ -70,6 +72,7 @@ export interface CreateInvestmentInstrumentRequest {
   assetTypeId: UUID;
   name: string;
   symbol?: string | null;
+  marketSymbolId?: UUID | null;
   currencyCode: CurrencyCode;
 }
 
@@ -77,6 +80,8 @@ export interface UpdateInvestmentInstrumentRequest {
   assetTypeId?: UUID;
   name?: string;
   symbol?: string | null;
+  marketSymbolId?: UUID | null;
+  currencyCode?: CurrencyCode;
   isActive?: boolean;
   version: Version;
 }
@@ -105,12 +110,50 @@ export interface InvestmentPriceDTO {
 
 export type SetInvestmentPriceResponse = InvestmentPriceDTO;
 
+export interface MarketSymbolDTO {
+  id: UUID;
+  providerSymbol: string;
+  exchangeCode: string;
+  market: "US" | "BIST";
+  instrumentType: "EQUITY" | "ETF" | "FUND" | "OTHER";
+  name: string;
+  currencyCode: CurrencyCode;
+}
+
+export type MarketSymbolListResponse = ItemListResponse<MarketSymbolDTO>;
+
+export interface InvestmentPriceAtDateDTO {
+  instrumentId: UUID;
+  priceDate: string;
+  price: MoneyString;
+  available: boolean;
+  source: "YAHOO" | "MANUAL" | "MISSING";
+}
+
+export type InvestmentPricesAtDateResponse = ItemListResponse<InvestmentPriceAtDateDTO>;
+
+export interface MarketPriceSyncRunDTO {
+  id: UUID;
+  kind: "PRICES";
+  targetDate: string;
+  status: "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED";
+  totalItems: number;
+  processedItems: number;
+  updatedItems: number;
+  missingItems: number;
+  failedItems: number;
+  startedAt: ISODateTimeString | null;
+  completedAt: ISODateTimeString | null;
+  createdAt: ISODateTimeString;
+}
+
 export interface InvestmentLotDTO {
   id: UUID;
   bookId: UUID;
   instrumentId: UUID;
   instrumentName: string;
   symbol: string | null;
+  currencyCode: CurrencyCode;
   accountId: UUID | null;
   accountName: string | null;
   quantity: MoneyString;
@@ -164,6 +207,10 @@ export interface InvestmentPortfolioItemDTO {
   currentValue: MoneyString | null;
   gain: MoneyString | null;
   gainPercent: MoneyString | null;
+  /** costBasis/currentValue/gain converted to TRY using the latest known TCMB rate; equal to the plain fields when currencyCode is already TRY, null when a foreign-currency instrument has no rate yet. */
+  costBasisTRY: MoneyString | null;
+  currentValueTRY: MoneyString | null;
+  gainTRY: MoneyString | null;
 }
 
 export type InvestmentPortfolioResponse = ItemListResponse<InvestmentPortfolioItemDTO>;
@@ -178,6 +225,7 @@ export interface InvestmentSaleDTO {
   instrumentId: UUID;
   instrumentName: string;
   symbol: string | null;
+  currencyCode: CurrencyCode;
   destinationAccountId: UUID;
   destinationAccountName: string;
   transactionId: UUID;

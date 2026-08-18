@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { CostCenterDTO } from "@defterx/contracts";
-import type { AccountView } from "../../finance/finance-views";
+import type { AccountView, TransactionView } from "../../finance/finance-views";
 import { TransactionDialog } from "./TransactionDialog";
 
 const account = {
@@ -32,6 +32,39 @@ const costCenter = {
   isActive: true,
   version: 1,
 } satisfies CostCenterDTO;
+
+const transaction = {
+  id: "transaction-1",
+  transactionNo: "1",
+  type: "EXPENSE",
+  accountId: account.id,
+  accountName: account.name,
+  targetAccountId: null,
+  targetAccountName: null,
+  title: "Yakıt",
+  description: null,
+  transactionDate: "2026-08-14T12:00:00.000Z",
+  dueDate: null,
+  status: "POSTED",
+  currencyCode: "TRY",
+  categoryId: null,
+  categoryName: null,
+  costCenterId: null,
+  costCenterName: null,
+  contactId: null,
+  version: 1,
+  amount: "1452.850000",
+  balanceDelta: "-1452.850000",
+  runningBalance: "0",
+  ui: {
+    kind: "expense",
+    description: "Yakıt",
+    date: "2026-08-14",
+    amount: 1452.85,
+    balanceDelta: -1452.85,
+    runningBalance: 0,
+  },
+} satisfies TransactionView;
 
 describe("TransactionDialog", () => {
   it("hedef hesabı yalnız transfer türünde gösterir", async () => {
@@ -105,5 +138,53 @@ describe("TransactionDialog", () => {
     await user.click(screen.getByRole("button", { name: "Vazgeç" }));
     expect(onClose).toHaveBeenCalledOnce();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("tutar alanında harfleri reddeder ve noktayı virgüle çevirir", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <TransactionDialog
+        accounts={[account]}
+        categories={[]}
+        costCenters={[]}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+        open
+        transaction={null}
+      />,
+    );
+
+    const amountInput = screen.getByLabelText(/Tutar/);
+    await user.type(amountInput, "23423werwefdwe.8500007");
+
+    expect(amountInput).toHaveValue("23423,850000");
+  });
+
+  it("düzeltmede API tutarını virgülle gösterir ve doğru kaydeder", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <TransactionDialog
+        accounts={[account]}
+        categories={[]}
+        costCenters={[]}
+        onClose={vi.fn()}
+        onSave={onSave}
+        open
+        transaction={transaction}
+      />,
+    );
+
+    expect(screen.getByLabelText(/Tutar/)).toHaveValue("1452,850000");
+    await user.click(screen.getByRole("button", { name: "Kaydet" }));
+
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledWith(
+        expect.objectContaining({ amount: "1452.85" }),
+        transaction,
+      );
+    });
   });
 });

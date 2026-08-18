@@ -1,9 +1,11 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import type {
   CategoryDTO,
   CostCenterDTO,
+  CurrencyDTO,
   InvestmentAssetTypeDTO,
   InvestmentInstrumentDTO,
+  MarketSymbolDTO,
 } from "@defterx/contracts";
 
 import {
@@ -385,21 +387,45 @@ export function InvestmentTypeDialog({
 }
 
 interface InstrumentDialogProps extends MutationDialogProps<SaveInstrumentInput> {
+  currencies: readonly CurrencyDTO[];
   instrument: InvestmentInstrumentDTO | null;
   investmentTypes: readonly InvestmentAssetTypeDTO[];
+  onSearchMarketSymbols: (query:string,market?:"BIST"|"US")=>Promise<readonly MarketSymbolDTO[]>;
 }
 
 export function InstrumentDialog({
+  currencies,
   instrument,
   investmentTypes,
+  onSearchMarketSymbols,
   onClose,
   onSave,
 }: InstrumentDialogProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [market,setMarket]=useState<""|"BIST"|"US">(instrument?.providerSymbol?.endsWith(".IS")?"BIST":instrument?.marketSymbolId?"US":"");
+  const [marketQuery,setMarketQuery]=useState(instrument?.providerSymbol??"");
+  const [marketSymbols,setMarketSymbols]=useState<readonly MarketSymbolDTO[]>([]);
+  const [marketSymbolId,setMarketSymbolId]=useState(instrument?.marketSymbolId??"");
+  const [symbol,setSymbol]=useState(instrument?.symbol??"");
+  const [name,setName]=useState(instrument?.name??"");
+  const [currencyCode,setCurrencyCode]=useState(instrument?.currencyCode??"TRY");
   const selectableTypes = investmentTypes.filter(
     (item) => item.isActive || item.id === instrument?.assetTypeId,
   );
+  const selectableCurrencies = currencies.filter(
+    (item) => item.isEnabled || item.code === instrument?.currencyCode,
+  );
+
+  useEffect(()=>{
+    let active=true;
+    const timer=window.setTimeout(()=>{
+      void onSearchMarketSymbols(marketQuery,market||undefined)
+        .then(items=>{if(active)setMarketSymbols(items);})
+        .catch(reason=>{if(active)setError(mutationErrorMessage(reason));});
+    },250);
+    return()=>{active=false;window.clearTimeout(timer);};
+  },[market,marketQuery,onSearchMarketSymbols]);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -409,6 +435,8 @@ export function InstrumentDialog({
       assetTypeId: formString(values, "assetTypeId"),
       name: formString(values, "name").trim(),
       symbol: symbol || null,
+      marketSymbolId: formString(values,"marketSymbolId")||null,
+      currencyCode: formString(values,"currencyCode")||"TRY",
     };
     const input: SaveInstrumentInput = instrument
       ? {
@@ -459,17 +487,83 @@ export function InstrumentDialog({
             <span>Sembol</span>
             <input
               name="symbol"
-              maxLength={30}
-              defaultValue={instrument?.symbol ?? ""}
+              maxLength={40}
+              value={symbol}
+              onChange={event=>setSymbol(event.target.value.toUpperCase())}
+              readOnly={Boolean(marketSymbolId)}
               disabled={busy}
             />
+          </label>
+          <label>
+            <span>Para birimi</span>
+            <select
+              name="currencyCode"
+              value={currencyCode}
+              disabled={busy||Boolean(marketSymbolId)}
+              onChange={event=>setCurrencyCode(event.target.value)}
+            >
+              {selectableCurrencies.map(item=>(
+                <option key={item.code} value={item.code}>{item.code} · {item.nameTr}</option>
+              ))}
+            </select>
+            {marketSymbolId
+              ? <small>Yahoo Finance koduna bağlı araçlarda para birimi otomatik belirlenir.</small>
+              : selectableCurrencies.length<=1
+                ? <small>Dolar, euro gibi başka para birimi eklemek için Ayarlar'daki Para Birimleri bölümünü kullanın.</small>
+                : null}
+          </label>
+          <label>
+            <span>Piyasa</span>
+            <select value={market} disabled={busy} onChange={event=>{
+              setMarket(event.target.value as ""|"BIST"|"US");
+              setMarketSymbolId("");
+            }}>
+              <option value="">Tümü</option>
+              <option value="BIST">Borsa İstanbul</option>
+              <option value="US">ABD borsaları</option>
+            </select>
+          </label>
+          <label className="full-field">
+            <span>Borsa kodu ara</span>
+            <input
+              value={marketQuery}
+              onChange={event=>setMarketQuery(event.target.value)}
+              placeholder="Örn. THYAO, AAPL veya fon adı"
+              disabled={busy}
+            />
+          </label>
+          <label className="full-field">
+            <span>Yahoo Finance kodu (otomatik fiyat)</span>
+            <select
+              name="marketSymbolId"
+              value={marketSymbolId}
+              disabled={busy}
+              onChange={event=>{
+                const id=event.target.value;
+                setMarketSymbolId(id);
+                const selected=marketSymbols.find(item=>item.id===id);
+                if(selected){setSymbol(selected.providerSymbol);setName(selected.name);}
+              }}
+            >
+              <option value="">Otomatik fiyat kullanma</option>
+              {instrument?.marketSymbolId&&!marketSymbols.some(item=>item.id===instrument.marketSymbolId)?(
+                <option value={instrument.marketSymbolId}>{instrument.providerSymbol??instrument.symbol} · {instrument.name}</option>
+              ):null}
+              {marketSymbols.map(item=>(
+                <option key={item.id} value={item.id}>
+                  {item.providerSymbol} · {item.name} · {item.exchangeCode}
+                </option>
+              ))}
+            </select>
+            <small>Kod seçildiğinde kapanış fiyatları günlük olarak otomatik güncellenir.</small>
           </label>
           <label className="full-field">
             <span>Ad</span>
             <input
               name="name"
               maxLength={120}
-              defaultValue={instrument?.name ?? ""}
+              value={name}
+              onChange={event=>setName(event.target.value)}
               disabled={busy}
               required
             />

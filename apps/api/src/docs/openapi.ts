@@ -101,8 +101,10 @@ paths:
     get: { summary: Dashboard aggregates, responses: { '200': { description: Dashboard } } }
   /reports/cash-flow:
     get: { summary: Cash flow grouped by day, week, month or year, responses: { '200': { description: Cash flow periods } } }
+  /reports/analytics:
+    get: { summary: Five-report analytics suite with trend, account history, category drill-down, liquidity forecast and investment performance, parameters: [{ in: query, name: from, schema: { type: string, format: date-time } }, { in: query, name: to, schema: { type: string, format: date-time } }, { in: query, name: accountIds, description: Comma-separated account UUIDs; omit for all or use none for no accounts, schema: { type: string } }, { in: query, name: granularity, schema: { type: string, enum: [day, week, month, year] } }], responses: { '200': { description: Analytics datasets }, '422': { description: Invalid range or account filter } } }
   /reports/income-expense:
-    get: { summary: Income and expense by category with signed cost-center breakdown, responses: { '200': { description: Report } } }
+    get: { summary: Income and expense by category with signed cost-center breakdown, parameters: [{ in: query, name: from, schema: { type: string, format: date-time } }, { in: query, name: to, schema: { type: string, format: date-time } }, { in: query, name: accountIds, description: Comma-separated account UUIDs; omit for all or use none for no accounts, schema: { type: string } }], responses: { '200': { description: Report } } }
   /reports/balances:
     get: { summary: Reconstructed account balances, responses: { '200': { description: Balances } } }
   /reports/receivables-payables:
@@ -114,4 +116,12 @@ paths:
   /investments/sales:
     get: { summary: List investment sales, responses: { '200': { description: Sales } } }
     post: { summary: Sell investment units and post proceeds to a selected account, responses: { '201': { description: Sold and posted } } }
+  /investments/market-symbols:
+    get: { summary: Search the weekly BIST and US market catalogue, responses: { '200': { description: Market symbols } } }
+  /investments/prices/by-date:
+    get: { summary: User instruments with the selected date close or zero when unavailable, responses: { '200': { description: Date prices } } }
+  /investments/prices/sync:
+    post: { summary: Queue a selected-day close refresh for the complete market catalogue, responses: { '202': { description: Synchronization queued } } }
+  /investments/prices/sync-status:
+    get: { summary: Latest complete-market price synchronization status for a date, responses: { '200': { description: Synchronization status } } }
 `;

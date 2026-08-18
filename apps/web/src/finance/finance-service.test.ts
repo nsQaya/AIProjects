@@ -101,7 +101,30 @@ function defaultResponse(path: string, options: RequestOptions<unknown>): unknow
   if (path.startsWith("/api/v1/reports/income-expense?")) {
     return { items: [], costCenters: [] };
   }
+  if (path.startsWith("/api/v1/reports/analytics?")) {
+    const url = new URL(path, "https://example.test");
+    return {
+      from: url.searchParams.get("from"),
+      to: url.searchParams.get("to"),
+      granularity: url.searchParams.get("granularity") ?? "month",
+      currencyCode: "TRY",
+      trend: [],
+      accountBalances: { accounts: [], items: [] },
+      categoryDetail: { breakdown: [], transactions: [] },
+      liquidity: { openingBalance: "0", items: [], events: [] },
+      netWorth: {
+        cashBalance: "0",
+        investmentCost: "0",
+        investmentValue: "0",
+        realizedGain: "0",
+        unrealizedGain: "0",
+        totalAssets: "0",
+        items: [],
+      },
+    };
+  }
   if (path.startsWith("/api/v1/investments/")) return { items: [] };
+  if (path.startsWith("/api/v1/currencies?")) return { items: [] };
 
   throw new Error(`Unexpected request: ${options.method ?? "GET"} ${path}`);
 }
@@ -166,6 +189,29 @@ async function initializedService(
 }
 
 describe("FinanceService transaction boundaries", () => {
+  it("keeps the core application ready when the initial analytics request fails", async () => {
+    const api = new MockFinanceAPI();
+    api.handler = (path, options) => {
+      if (path.startsWith("/api/v1/reports/analytics?")) {
+        throw new Error("Report backend unavailable");
+      }
+      return defaultResponse(path, options);
+    };
+    const service = new FinanceService(api, {
+      now: () => new Date("2026-08-07T12:00:00.000Z"),
+      randomUUID: () => "10000000-0000-4000-8000-000000000001",
+      sleep: () => Promise.resolve(),
+    });
+
+    await service.initialize();
+
+    expect(service.getSnapshot()).toMatchObject({
+      phase: "ready",
+      reportAnalytics: null,
+      reportLoadFailed: true,
+    });
+  });
+
   it("serializes an empty account selection as accountIds=none", async () => {
     const { api, service } = await initializedService();
 
@@ -218,6 +264,51 @@ describe("FinanceService transaction boundaries", () => {
         amount: "-250.00",
       },
     ]);
+
+    const request = api.calls.find((call) => call.path.startsWith("/api/v1/reports/income-expense?"));
+    expect(request).toBeDefined();
+    const url = new URL(request!.path, "https://example.test");
+    expect(url.searchParams.get("from")).toBe("2026-08-01T00:00:00.000Z");
+    expect(url.searchParams.get("to")).toBe("2026-08-31T23:59:59.999Z");
+  });
+
+  it("serializes report account selections without losing date boundaries", async () => {
+    const { api, service } = await initializedService();
+
+    await service.loadIncomeExpenseReport({
+      from: "2026-07-01",
+      to: "2026-08-31",
+      accountIds: [ACCOUNT_ID],
+    });
+
+    const selected = new URL(api.calls[0]!.path, "https://example.test");
+    expect(selected.searchParams.get("accountIds")).toBe(ACCOUNT_ID);
+    expect(selected.searchParams.get("from")).toBe("2026-07-01T00:00:00.000Z");
+    expect(selected.searchParams.get("to")).toBe("2026-08-31T23:59:59.999Z");
+
+    await service.loadIncomeExpenseReport({ accountIds: [] });
+    const none = new URL(api.calls[1]!.path, "https://example.test");
+    expect(none.searchParams.get("accountIds")).toBe("none");
+  });
+
+  it("loads the five-report analytics suite with shared filters", async () => {
+    const { api, service } = await initializedService();
+
+    await service.loadReportAnalytics({
+      from: "2026-01-01",
+      to: "2026-08-31",
+      accountIds: [ACCOUNT_ID],
+      granularity: "week",
+    });
+
+    const request = api.calls.find((call) => call.path.startsWith("/api/v1/reports/analytics?"));
+    expect(request).toBeDefined();
+    const url = new URL(request!.path, "https://example.test");
+    expect(url.searchParams.get("accountIds")).toBe(ACCOUNT_ID);
+    expect(url.searchParams.get("granularity")).toBe("week");
+    expect(url.searchParams.get("from")).toBe("2026-01-01T00:00:00.000Z");
+    expect(url.searchParams.get("to")).toBe("2026-08-31T23:59:59.999Z");
+    expect(service.getSnapshot().reportAnalytics?.currencyCode).toBe("TRY");
   });
 
   it("uses the cost-center CRUD endpoints with versioned payloads", async () => {
@@ -367,6 +458,7 @@ describe("FinanceService transaction boundaries", () => {
           instrumentId: INSTRUMENT_ID,
           instrumentName: "Fon",
           symbol: null,
+          currencyCode: "TRY",
           destinationAccountId: ACCOUNT_ID,
           destinationAccountName: "Banka",
           transactionId: SALE_TRANSACTION_ID,

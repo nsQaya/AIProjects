@@ -43,7 +43,20 @@ export interface Env {
 
 export type BackgroundJob =
   | { type: "PROCESS_RECURRING"; recurringId?: string }
-  | { type: "SEND_REMINDER"; scheduledTransactionId: string };
+  | { type: "SEND_REMINDER"; scheduledTransactionId: string }
+  | { type: "SYNC_MARKET_CATALOG" }
+  | { type: "ENSURE_MARKET_DATA"; targetDate: string }
+  | { type: "PLAN_MARKET_PRICES"; runId: string; targetDate: string }
+  | {
+      type: "FETCH_MARKET_PRICE_BATCH";
+      runId: string;
+      targetDate: string;
+      batchKey: string;
+      items: Array<{ id: string; symbol: string }>;
+    }
+  | { type: "PLAN_MARKET_SPLITS" }
+  | { type: "FETCH_MARKET_SPLIT_BATCH"; items: Array<{ id: string; symbol: string }> }
+  | { type: "SYNC_CURRENCY_RATES"; targetDate: string };
 
 export interface AuthUser { id: string; email: string }
 

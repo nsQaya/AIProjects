@@ -3,9 +3,12 @@ import type {
   BookListItemDTO,
   CategoryDTO,
   CostCenterDTO,
+  CurrencyDTO,
   InvestmentAssetTypeDTO,
   IncomeExpenseCostCenterItemDTO,
   ReceivablePayableReportItemDTO,
+  ReportAnalyticsResponse,
+  ReportGranularity,
   UUID,
 } from "@defterx/contracts";
 import type { AuthUser } from "../platform/auth/auth-schemas";
@@ -37,6 +40,8 @@ export interface TransactionFilter {
 export interface ReportRange {
   from?: string;
   to?: string;
+  accountIds?: readonly UUID[];
+  granularity?: ReportGranularity;
 }
 
 export interface CashFlowVisibility {
@@ -61,6 +66,7 @@ export interface FinanceSnapshot {
   accounts: readonly AccountView[];
   categories: readonly (CategoryDTO & { ui: { kind: "income" | "expense" } })[];
   costCenters: readonly CostCenterDTO[];
+  currencies: readonly CurrencyDTO[];
   transactions: readonly TransactionView[];
   transactionOpeningBalance: string;
   transactionOpeningBalanceValue: number;
@@ -78,6 +84,9 @@ export interface FinanceSnapshot {
   reportItems: readonly IncomeExpenseReportItemView[];
   reportCostCenters: readonly IncomeExpenseCostCenterItemDTO[];
   reportRange: ReportRange;
+  reportRangeExplicit: boolean;
+  reportAnalytics: ReportAnalyticsResponse | null;
+  reportLoadFailed: boolean;
   balanceReportItems: readonly BalanceReportItemDTO[];
   receivablePayableReportItems: readonly ReceivablePayableReportItemDTO[];
   investmentTypes: readonly InvestmentAssetTypeDTO[];
@@ -106,6 +115,7 @@ export function createInitialFinanceSnapshot(): FinanceSnapshot {
     accounts: [],
     categories: [],
     costCenters: [],
+    currencies: [],
     transactions: [],
     transactionOpeningBalance: "0",
     transactionOpeningBalanceValue: 0,
@@ -123,6 +133,9 @@ export function createInitialFinanceSnapshot(): FinanceSnapshot {
     reportItems: [],
     reportCostCenters: [],
     reportRange: {},
+    reportRangeExplicit: false,
+    reportAnalytics: null,
+    reportLoadFailed: false,
     balanceReportItems: [],
     receivablePayableReportItems: [],
     investmentTypes: [],

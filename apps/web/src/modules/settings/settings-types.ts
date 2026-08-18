@@ -3,8 +3,14 @@ import type {
   CategoryDTO,
   CategoryType,
   CostCenterDTO,
+  CurrencyDTO,
+  CurrencyRateAtDateDTO,
+  CurrencyRateSyncRunDTO,
   InvestmentAssetTypeDTO,
   InvestmentInstrumentDTO,
+  InvestmentPriceAtDateDTO,
+  MarketPriceSyncRunDTO,
+  MarketSymbolDTO,
   MoneyString,
   UserDTO,
   Version,
@@ -21,6 +27,7 @@ export interface SettingsViewModel {
   book: Pick<BookDTO, "baseCurrency" | "name"> | null;
   categories: readonly CategoryDTO[];
   costCenters: readonly CostCenterDTO[];
+  currencies: readonly CurrencyDTO[];
   instruments: readonly InvestmentInstrumentDTO[];
   investmentTypes: readonly InvestmentAssetTypeDTO[];
   user: Pick<UserDTO, "displayName" | "email"> | null;
@@ -77,6 +84,9 @@ export type SaveInstrumentInput =
       assetTypeId: string;
       name: string;
       symbol: string | null;
+      marketSymbolId: string | null;
+      /** Ignored when marketSymbolId is set — the linked market symbol's currency wins. */
+      currencyCode: string;
     }
   | {
       mode: "update";
@@ -84,6 +94,9 @@ export type SaveInstrumentInput =
       id: string;
       name: string;
       symbol: string | null;
+      marketSymbolId: string | null;
+      /** Ignored when marketSymbolId is set — the linked market symbol's currency wins. */
+      currencyCode: string;
       version: Version;
     };
 
@@ -117,6 +130,15 @@ export interface SettingsActions {
   onSaveInstrument: (input: SaveInstrumentInput) => Promise<void>;
   onSaveInstrumentPrice: (input: SaveInstrumentPriceInput) => Promise<void>;
   onSaveInvestmentType: (input: SaveInvestmentTypeInput) => Promise<void>;
+  onSearchMarketSymbols: (query: string, market?: "BIST" | "US") => Promise<readonly MarketSymbolDTO[]>;
+  onLoadInstrumentPrices: (date: string) => Promise<readonly InvestmentPriceAtDateDTO[]>;
+  onSyncMarketPrices: (date: string) => Promise<MarketPriceSyncRunDTO>;
+  onMarketPriceSyncStatus: (date: string) => Promise<MarketPriceSyncRunDTO | null>;
+  onEnableCurrency: (code: string) => Promise<void>;
+  onDisableCurrency: (code: string) => Promise<void>;
+  onLoadCurrencyRates: (date: string) => Promise<readonly CurrencyRateAtDateDTO[]>;
+  onSyncCurrencyRates: (date: string) => Promise<CurrencyRateSyncRunDTO>;
+  onCurrencyRateSyncStatus: (date: string) => Promise<CurrencyRateSyncRunDTO | null>;
 }
 
 export type ConfirmSettingsAction = (message: string) => boolean;

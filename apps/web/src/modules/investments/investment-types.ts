@@ -29,6 +29,9 @@ export interface InvestmentPortfolioViewModel {
   readonly currentValue: MoneyString | null;
   readonly gain: MoneyString | null;
   readonly gainPercent: MoneyString | null;
+  readonly costBasisTRY: MoneyString | null;
+  readonly currentValueTRY: MoneyString | null;
+  readonly gainTRY: MoneyString | null;
 }
 
 export interface InvestmentLotViewModel {
@@ -36,6 +39,7 @@ export interface InvestmentLotViewModel {
   readonly instrumentId: UUID;
   readonly instrumentName: string;
   readonly symbol: string | null;
+  readonly currencyCode: string;
   readonly accountId: UUID | null;
   readonly accountName: string | null;
   readonly quantity: MoneyString;
@@ -51,6 +55,7 @@ export interface InvestmentSaleViewModel {
   readonly instrumentId: UUID;
   readonly instrumentName: string;
   readonly symbol: string | null;
+  readonly currencyCode: string;
   readonly destinationAccountId: UUID;
   readonly destinationAccountName: string;
   readonly quantity: MoneyString;

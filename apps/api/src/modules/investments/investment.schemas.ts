@@ -10,11 +10,14 @@ export const updateAssetTypeSchema = z.object({
 });
 export const createInstrumentSchema = z.object({
   bookId:uuid,assetTypeId:uuid,name:z.string().trim().min(1).max(120),
-  symbol:z.string().trim().min(1).max(30).nullable().optional(),currencyCode:currency,
+  symbol:z.string().trim().min(1).max(40).nullable().optional(),currencyCode:currency,
+  marketSymbolId:uuid.nullable().optional(),
 });
 export const updateInstrumentSchema = z.object({
   assetTypeId:uuid.optional(),name:z.string().trim().min(1).max(120).optional(),
-  symbol:z.string().trim().min(1).max(30).nullable().optional(),isActive:z.boolean().optional(),version,
+  symbol:z.string().trim().min(1).max(40).nullable().optional(),marketSymbolId:uuid.nullable().optional(),
+  currencyCode:currency.optional(),
+  isActive:z.boolean().optional(),version,
 });
 export const createLotSchema = z.object({
   bookId:uuid,instrumentId:uuid,accountId:uuid.nullable().optional(),quantity:money,unitPrice:money,

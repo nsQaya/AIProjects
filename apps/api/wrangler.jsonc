@@ -16,9 +16,9 @@
   "ratelimits": [{ "name": "RATE_LIMITER", "namespace_id": "1001", "simple": { "limit": 10, "period": 60 } }],
   "queues": {
     "producers": [{ "binding": "JOBS", "queue": "defterx-jobs" }],
-    "consumers": [{ "queue": "defterx-jobs", "max_batch_size": 10, "max_batch_timeout": 5, "max_retries": 3 }]
+    "consumers": [{ "queue": "defterx-jobs", "max_batch_size": 10, "max_batch_timeout": 5, "max_retries": 3, "max_concurrency": 2 }]
   },
-  "triggers": { "crons": ["*/15 * * * *"] },
+  "triggers": { "crons": ["*/15 * * * *", "5 3 * * 1", "30 22 * * 2-6", "0 13 * * 2-6"] },
   "placement": { "mode": "smart" },
   "observability": { "enabled": true, "head_sampling_rate": 0.1 }
 }

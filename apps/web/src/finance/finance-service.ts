@@ -20,6 +20,9 @@ import type {
   CreateScheduledTransactionResponse,
   CreateTransactionRequest,
   CreateTransactionResponse,
+  CurrencyListResponse,
+  CurrencyRateSyncRunDTO,
+  CurrencyRatesAtDateResponse,
   DeleteAccountResponse,
   DeleteCategoryResponse,
   DeleteCostCenterResponse,
@@ -28,10 +31,16 @@ import type {
   DeleteInvestmentLotResponse,
   DeleteInvestmentSaleResponse,
   DeleteScheduledTransactionResponse,
+  DisableCurrencyResponse,
+  EnableCurrencyResponse,
   IncomeExpenseReportResponse,
   InvestmentPriceDTO,
+  InvestmentPricesAtDateResponse,
+  MarketPriceSyncRunDTO,
+  MarketSymbolListResponse,
   RealizeScheduledTransactionResponse,
   ReceivablePayableReportResponse,
+  ReportAnalyticsResponse,
   ReverseTransactionResponse,
   SetInvestmentPriceRequest,
   SetScheduledStatusRequest,
@@ -126,6 +135,10 @@ import {
   investmentLotSchema,
   investmentPortfolioSchema,
   investmentPriceSchema,
+  investmentPricesAtDateSchema,
+  marketPriceSyncRunSchema,
+  marketPriceSyncStatusSchema,
+  marketSymbolListSchema,
   investmentSaleListSchema,
   investmentSaleSchema,
 } from "./schemas/investments";
@@ -134,8 +147,17 @@ import {
   cashFlowResponseSchema,
   dashboardReportSchema,
   incomeExpenseReportSchema,
+  reportAnalyticsSchema,
   receivablePayableReportSchema,
 } from "./schemas/reports";
+import {
+  currencyListSchema,
+  currencyRateSyncRunSchema,
+  currencyRateSyncStatusSchema,
+  currencyRatesAtDateSchema,
+  disableCurrencyResponseSchema,
+  enableCurrencyResponseSchema,
+} from "./schemas/currencies";
 
 export interface FinanceAPIClient {
   readonly session: AuthSession | null;
@@ -349,6 +371,7 @@ export class FinanceService {
         accountsResponse,
         categoriesResponse,
         costCentersResponse,
+        currenciesResponse,
         transactionsResponse,
         scheduledResponse,
       ] =
@@ -361,6 +384,9 @@ export class FinanceService {
           }),
           this.#api.request(`/api/v1/cost-centers?${baseQuery}&includeInactive=true`, {
             schema: costCenterListSchema,
+          }),
+          this.#api.request(`/api/v1/currencies?${baseQuery}`, {
+            schema: currencyListSchema,
           }),
           this.#api.request(`/api/v1/transactions?${baseQuery}&limit=1000`, {
             schema: transactionListSchema,
@@ -378,15 +404,23 @@ export class FinanceService {
         ui: { kind: category.categoryType.toLowerCase() as "income" | "expense" },
       }));
       const costCenters = costCentersResponse.items;
+      const currencies = currenciesResponse.items;
       const categoryNames = new Map(categories.map((category) => [category.id, category.name]));
       const upcoming = scheduledResponse.items.map((item) =>
         scheduledTransactionView(item, categoryNames),
       );
       const cashflowAccountIds = this.#nextCashFlowAccountIds(accounts);
       const window = cashFlowWindow(this.#state.cashflowRange, this.#now());
+      // The dashboard summary always reflects the current month, independent of
+      // any date/account filter the user applied on the Reports page.
       const range = { from: monthStart(this.#now()), to: this.#now().toISOString() };
+      // Analytics reuses the user's explicit report filter when one is active;
+      // otherwise it gets the same fresh month-to-date default as the dashboard.
+      const analyticsRange: ReportRange = this.#state.reportRangeExplicit
+        ? this.#state.reportRange
+        : { ...range, granularity: "month" };
 
-      const [dashboard, cashflow, reports, types, instruments, lots, sales, portfolio] =
+      const [dashboard, cashflow, analytics, types, instruments, lots, sales, portfolio] =
         await Promise.all([
           this.#api.request(
             `/api/v1/reports/dashboard?${buildQuery({ bookId: book.id, ...range, _: revision })}`,
@@ -404,12 +438,11 @@ export class FinanceService {
             { schema: cashFlowResponseSchema },
           ),
           this.#api.request(
-            `/api/v1/reports/income-expense?${buildQuery({
-              bookId: book.id,
-              ...range,
-              _: revision,
-            })}`,
-            { schema: incomeExpenseReportSchema },
+            `/api/v1/reports/analytics?${this.#reportQuery(analyticsRange)}`,
+            { schema: reportAnalyticsSchema },
+          ).then(
+            (value) => ({ failed: false as const, value }),
+            () => ({ failed: true as const, value: null }),
           ),
           this.#api.request(
             `/api/v1/investments/asset-types?${baseQuery}&includeInactive=true`,
@@ -441,6 +474,7 @@ export class FinanceService {
         accounts,
         categories,
         costCenters,
+        currencies,
         upcoming,
         dashboard: dashboardView(dashboard),
         cashflowAccountIds:
@@ -471,9 +505,9 @@ export class FinanceService {
           : {}),
         ...(reportSequence === this.#reportSequence
           ? {
-              reportRange: range,
-              reportItems: reports.items.map(incomeExpenseReportItemView),
-              reportCostCenters: reports.costCenters,
+              reportRange: analyticsRange,
+              reportAnalytics: analytics.value ?? state.reportAnalytics,
+              reportLoadFailed: analytics.failed,
             }
           : {}),
       }));
@@ -589,6 +623,37 @@ export class FinanceService {
         reportRange: stableRange,
         reportItems: response.items.map(incomeExpenseReportItemView),
         reportCostCenters: response.costCenters,
+      }));
+    }
+    return response;
+  }
+
+  async loadReportAnalytics(range: ReportRange = {}): Promise<ReportAnalyticsResponse> {
+    const sequence = ++this.#reportSequence;
+    const stableRange: ReportRange = {
+      ...range,
+      accountIds: range.accountIds ? [...range.accountIds] : undefined,
+      granularity: range.granularity ?? "month",
+    };
+    let response: ReportAnalyticsResponse;
+    try {
+      response = await this.#api.request(
+        `/api/v1/reports/analytics?${this.#reportQuery(stableRange)}`,
+        { schema: reportAnalyticsSchema },
+      );
+    } catch (error) {
+      if (sequence === this.#reportSequence) {
+        this.#commit((state) => ({ ...state, reportLoadFailed: true }));
+      }
+      throw error;
+    }
+    if (sequence === this.#reportSequence) {
+      this.#commit((state) => ({
+        ...state,
+        reportRange: stableRange,
+        reportRangeExplicit: true,
+        reportAnalytics: response,
+        reportLoadFailed: false,
       }));
     }
     return response;
@@ -862,6 +927,77 @@ export class FinanceService {
     });
   }
 
+  searchMarketSymbols(query: string, market?: "BIST" | "US"): Promise<MarketSymbolListResponse> {
+    return this.#api.request(`/api/v1/investments/market-symbols?${buildQuery({
+      q: query,
+      market,
+      limit: 40,
+    })}`, { schema: marketSymbolListSchema });
+  }
+
+  instrumentPricesAtDate(date: string): Promise<InvestmentPricesAtDateResponse> {
+    return this.#api.request(`/api/v1/investments/prices/by-date?${buildQuery({
+      bookId: this.bookId(),date,
+    })}`, { schema: investmentPricesAtDateSchema });
+  }
+
+  syncMarketPrices(date: string): Promise<MarketPriceSyncRunDTO> {
+    return this.#api.request("/api/v1/investments/prices/sync", {
+      method: "POST",
+      body: {bookId:this.bookId(),date},
+      schema: marketPriceSyncRunSchema,
+    });
+  }
+
+  async marketPriceSyncStatus(date: string): Promise<MarketPriceSyncRunDTO | null> {
+    const response=await this.#api.request(`/api/v1/investments/prices/sync-status?${buildQuery({
+      bookId:this.bookId(),date,
+    })}`, { schema: marketPriceSyncStatusSchema });
+    return response.run;
+  }
+
+  listCurrencies(): Promise<CurrencyListResponse> {
+    return this.#api.request(`/api/v1/currencies?${buildQuery({ bookId: this.bookId() })}`, {
+      schema: currencyListSchema,
+    });
+  }
+
+  enableCurrency(code: string): Promise<EnableCurrencyResponse> {
+    return this.#api.request(`/api/v1/currencies/${code}/enable`, {
+      method: "POST",
+      body: { bookId: this.bookId() },
+      schema: enableCurrencyResponseSchema,
+    });
+  }
+
+  disableCurrency(code: string): Promise<DisableCurrencyResponse> {
+    return this.#api.request(
+      `/api/v1/currencies/${code}/enable?${buildQuery({ bookId: this.bookId() })}`,
+      { method: "DELETE", schema: disableCurrencyResponseSchema },
+    );
+  }
+
+  currencyRatesAtDate(date: string): Promise<CurrencyRatesAtDateResponse> {
+    return this.#api.request(`/api/v1/currencies/rates/by-date?${buildQuery({
+      bookId: this.bookId(),date,
+    })}`, { schema: currencyRatesAtDateSchema });
+  }
+
+  syncCurrencyRates(date: string): Promise<CurrencyRateSyncRunDTO> {
+    return this.#api.request("/api/v1/currencies/rates/sync", {
+      method: "POST",
+      body: { bookId: this.bookId(), date },
+      schema: currencyRateSyncRunSchema,
+    });
+  }
+
+  async currencyRateSyncStatus(date: string): Promise<CurrencyRateSyncRunDTO | null> {
+    const response = await this.#api.request(`/api/v1/currencies/rates/sync-status?${buildQuery({ date })}`, {
+      schema: currencyRateSyncStatusSchema,
+    });
+    return response.run;
+  }
+
   createLot(input: CreateFinanceLotInput): Promise<CreateInvestmentLotResponse> {
     return this.#api.request("/api/v1/investments/lots", {
       method: "POST",
@@ -927,6 +1063,8 @@ export class FinanceService {
       bookId: this.bookId(),
       from: range.from ? startOfDayBoundary(range.from) : undefined,
       to: range.to ? endOfDayBoundary(range.to) : undefined,
+      accountIds: serializeCashFlowAccountIds(range.accountIds),
+      granularity: range.granularity,
       _: this.#now().getTime(),
     });
   }

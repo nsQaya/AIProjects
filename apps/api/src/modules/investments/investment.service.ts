@@ -8,12 +8,32 @@ import type {
 
 const typeProjection = `id,book_id AS "bookId",name,icon,is_system AS "isSystem",is_active AS "isActive",sort_order AS "sortOrder",version`;
 const instrumentProjection = `i.id,i.book_id AS "bookId",i.asset_type_id AS "assetTypeId",t.name AS "assetTypeName",
-  i.name,i.symbol,i.currency_code AS "currencyCode",i.is_active AS "isActive",i.version,
+  i.name,i.symbol,i.market_symbol_id AS "marketSymbolId",market.provider_symbol AS "providerSymbol",
+  i.currency_code AS "currencyCode",i.is_active AS "isActive",i.version,
   latest.price::text AS "latestPrice",latest.priced_at AS "latestPriceAt"`;
+const marketJoin = `LEFT JOIN market_symbols market ON market.id=i.market_symbol_id`;
+const latestPriceJoin = `LEFT JOIN LATERAL (
+  SELECT candidate.price,candidate.priced_at FROM (
+    SELECT ip.price,ip.priced_at,0 priority FROM investment_prices ip WHERE ip.instrument_id=i.id
+    UNION ALL
+    SELECT mp.close AS price,(mp.price_date::timestamp AT TIME ZONE 'Europe/Istanbul') AS priced_at,1 priority
+    FROM market_daily_prices mp WHERE mp.market_symbol_id=i.market_symbol_id
+  ) candidate ORDER BY candidate.priced_at DESC,candidate.priority LIMIT 1
+) latest ON true`;
+// Latest known TCMB rate for the instrument's own currency; NULL for TRY
+// instruments (never queried, see fxRate() below) and for a foreign currency
+// with no rate synced yet.
+const latestFxRateJoin = `LEFT JOIN LATERAL (
+  SELECT try_rate FROM currency_daily_rates
+  WHERE currency_code=i.currency_code ORDER BY rate_date DESC LIMIT 1
+) fx ON i.currency_code<>'TRY'`;
+const fxValue = (expression:string) => `CASE WHEN i.currency_code='TRY' THEN ${expression} WHEN fx.try_rate IS NULL THEN NULL ELSE (${expression})*fx.try_rate END`;
 const lotProjection = `l.id,l.book_id AS "bookId",l.instrument_id AS "instrumentId",i.name AS "instrumentName",i.symbol,
+  i.currency_code AS "currencyCode",
   l.account_id AS "accountId",a.name AS "accountName",l.quantity::text,l.unit_price::text AS "unitPrice",
   (l.quantity*l.unit_price)::text AS "costBasis",l.purchased_at AS "purchasedAt",l.notes,l.version`;
 const saleProjection = `s.id,s.book_id AS "bookId",s.instrument_id AS "instrumentId",i.name AS "instrumentName",i.symbol,
+  i.currency_code AS "currencyCode",
   s.destination_account_id AS "destinationAccountId",a.name AS "destinationAccountName",s.transaction_id AS "transactionId",
   s.quantity::text,s.unit_price::text AS "unitPrice",(s.quantity*s.unit_price)::text AS proceeds,
   s.cost_basis::text AS "costBasis",(s.quantity*s.unit_price-s.cost_basis)::text AS gain,
@@ -64,7 +84,7 @@ export async function listInstruments(client:DbClient,bookId:string,includeInact
   const result=await client.query(
     `SELECT ${instrumentProjection} FROM investment_instruments i
      JOIN investment_asset_types t ON t.id=i.asset_type_id
-     LEFT JOIN LATERAL (SELECT price,priced_at FROM investment_prices WHERE instrument_id=i.id ORDER BY priced_at DESC,id DESC LIMIT 1) latest ON true
+     ${marketJoin} ${latestPriceJoin}
      WHERE i.book_id=$1 AND i.deleted_at IS NULL AND ($2::boolean OR i.is_active=true) ORDER BY t.sort_order,i.name`,
     [bookId,includeInactive],
   );
@@ -74,9 +94,12 @@ export async function listInstruments(client:DbClient,bookId:string,includeInact
 export async function createInstrument(client:DbClient,userId:string,input:CreateInstrumentInput){
   return inTransaction(client,async transaction=>{
     await assertAssetType(transaction,input.bookId,input.assetTypeId);
+    const market=input.marketSymbolId?await resolveMarketSymbol(transaction,input.marketSymbolId):null;
+    if(!market)await assertCurrencyAvailable(transaction,input.bookId,input.currencyCode);
     const inserted=await transaction.query<{id:string}>(
-      `INSERT INTO investment_instruments(book_id,asset_type_id,name,symbol,currency_code) VALUES($1,$2,$3,$4,$5) RETURNING id`,
-      [input.bookId,input.assetTypeId,input.name,input.symbol??null,input.currencyCode],
+      `INSERT INTO investment_instruments(book_id,asset_type_id,name,symbol,currency_code,market_symbol_id)
+       VALUES($1,$2,$3,$4,$5,$6) RETURNING id`,
+      [input.bookId,input.assetTypeId,input.name,market?.provider_symbol??input.symbol??null,market?.currency_code??input.currencyCode,market?.id??null],
     );
     const value=(await findInstrument(transaction,inserted.rows[0]!.id))!;
     await audit(transaction,input.bookId,userId,"INVESTMENT_INSTRUMENT",value.id,"CREATE",value);
@@ -88,11 +111,22 @@ export async function updateInstrument(client:DbClient,userId:string,id:string,i
   return inTransaction(client,async transaction=>{
     const bookId=await instrumentBookId(transaction,id);
     if(input.assetTypeId)await assertAssetType(transaction,bookId,input.assetTypeId);
+    const market=input.marketSymbolId?await resolveMarketSymbol(transaction,input.marketSymbolId):null;
+    const symbol=market?.provider_symbol??input.symbol??null;
+    // A newly linked market symbol always wins; otherwise an explicit manual
+    // currencyCode (for a non-market instrument) can change it.
+    if(!market&&input.currencyCode!==undefined)await assertCurrencyAvailable(transaction,bookId,input.currencyCode);
+    const currencyCode=market?.currency_code??input.currencyCode;
+    const currencyProvided=Boolean(market)||input.currencyCode!==undefined;
     const result=await transaction.query(
       `UPDATE investment_instruments SET asset_type_id=COALESCE($2,asset_type_id),name=COALESCE($3,name),
-       symbol=CASE WHEN $4::boolean THEN $5 ELSE symbol END,is_active=COALESCE($6,is_active),updated_at=now(),version=version+1
-       WHERE id=$1 AND version=$7 AND deleted_at IS NULL RETURNING id`,
-      [id,input.assetTypeId??null,input.name??null,input.symbol!==undefined,input.symbol??null,input.isActive??null,input.version],
+       symbol=CASE WHEN $4::boolean THEN $5 ELSE symbol END,
+       market_symbol_id=CASE WHEN $6::boolean THEN $7 ELSE market_symbol_id END,
+       currency_code=CASE WHEN $8::boolean THEN $9 ELSE currency_code END,
+       is_active=COALESCE($10,is_active),updated_at=now(),version=version+1
+       WHERE id=$1 AND version=$11 AND deleted_at IS NULL RETURNING id`,
+      [id,input.assetTypeId??null,input.name??null,input.symbol!==undefined||input.marketSymbolId!==undefined,symbol,
+       input.marketSymbolId!==undefined,market?.id??null,currencyProvided,currencyCode??null,input.isActive??null,input.version],
     );
     if(!result.rows[0])throw new AppError(409,"VERSION_CONFLICT","Investment instrument changed on another device");
     const value=(await findInstrument(transaction,id))!;
@@ -205,11 +239,14 @@ export async function portfolio(client:DbClient,bookId:string){
        CASE WHEN latest.price IS NULL THEN NULL ELSE ((p.quantity-COALESCE(s.quantity,0))*latest.price)::text END AS "currentValue",
        CASE WHEN latest.price IS NULL THEN NULL ELSE ((p.quantity-COALESCE(s.quantity,0))*latest.price-(p.cost_basis-COALESCE(s.cost_basis,0)))::text END AS gain,
        CASE WHEN latest.price IS NULL OR (p.cost_basis-COALESCE(s.cost_basis,0))=0 THEN NULL
-            ELSE ((((p.quantity-COALESCE(s.quantity,0))*latest.price-(p.cost_basis-COALESCE(s.cost_basis,0)))/(p.cost_basis-COALESCE(s.cost_basis,0)))*100)::text END AS "gainPercent"
+            ELSE ((((p.quantity-COALESCE(s.quantity,0))*latest.price-(p.cost_basis-COALESCE(s.cost_basis,0)))/(p.cost_basis-COALESCE(s.cost_basis,0)))*100)::text END AS "gainPercent",
+       ${fxValue(`(p.cost_basis-COALESCE(s.cost_basis,0))`)}::text AS "costBasisTRY",
+       ${fxValue(`(p.quantity-COALESCE(s.quantity,0))*latest.price`)}::text AS "currentValueTRY",
+       ${fxValue(`(p.quantity-COALESCE(s.quantity,0))*latest.price-(p.cost_basis-COALESCE(s.cost_basis,0))`)}::text AS "gainTRY"
      FROM purchases p JOIN investment_instruments i ON i.id=p.instrument_id
      JOIN investment_asset_types t ON t.id=i.asset_type_id
      LEFT JOIN sales s ON s.instrument_id=i.id
-     LEFT JOIN LATERAL (SELECT price,priced_at FROM investment_prices WHERE instrument_id=i.id ORDER BY priced_at DESC,id DESC LIMIT 1) latest ON true
+     ${latestPriceJoin} ${latestFxRateJoin}
      WHERE p.quantity-COALESCE(s.quantity,0)>0
      ORDER BY i.name`,
     [bookId],
@@ -344,7 +381,7 @@ async function saleValues(client:DbClient,bookId:string,instrumentId:string,quan
 }
 
 async function findInstrument(client:DbClient,id:string){
-  const result=await client.query(`SELECT ${instrumentProjection} FROM investment_instruments i JOIN investment_asset_types t ON t.id=i.asset_type_id LEFT JOIN LATERAL (SELECT price,priced_at FROM investment_prices WHERE instrument_id=i.id ORDER BY priced_at DESC,id DESC LIMIT 1) latest ON true WHERE i.id=$1 AND i.deleted_at IS NULL`,[id]);
+  const result=await client.query(`SELECT ${instrumentProjection} FROM investment_instruments i JOIN investment_asset_types t ON t.id=i.asset_type_id ${marketJoin} ${latestPriceJoin} WHERE i.id=$1 AND i.deleted_at IS NULL`,[id]);
   return result.rows[0];
 }
 async function findLot(client:DbClient,id:string){
@@ -378,6 +415,18 @@ export async function saleBookId(client:DbClient,id:string){
 async function assertAssetType(client:DbClient,bookId:string,id:string){
   const result=await client.query(`SELECT 1 FROM investment_asset_types WHERE id=$1 AND book_id=$2 AND is_active=true AND deleted_at IS NULL`,[id,bookId]);
   if(!result.rowCount)throw new AppError(422,"INVESTMENT_TYPE_INVALID","Investment type is unavailable");
+}
+async function assertCurrencyAvailable(client:DbClient,bookId:string,code:string){
+  if(code==="TRY")return;
+  const result=await client.query(`SELECT 1 FROM book_currencies WHERE book_id=$1 AND currency_code=$2`,[bookId,code]);
+  if(!result.rowCount)throw new AppError(422,"CURRENCY_NOT_ENABLED","Currency must be enabled for this book first");
+}
+async function resolveMarketSymbol(client:DbClient,id:string){
+  const result=await client.query<{currency_code:string;id:string;provider_symbol:string}>(
+    `SELECT id,provider_symbol,currency_code FROM market_symbols WHERE id=$1 AND is_active=true`,[id],
+  );
+  if(!result.rows[0])throw new AppError(422,"MARKET_SYMBOL_INVALID","Selected market symbol is unavailable");
+  return result.rows[0];
 }
 async function assertInvestmentScope(client:DbClient,bookId:string,instrumentId:string,accountId?:string|null){
   const instrument=await client.query(`SELECT 1 FROM investment_instruments WHERE id=$1 AND book_id=$2 AND is_active=true AND deleted_at IS NULL`,[instrumentId,bookId]);

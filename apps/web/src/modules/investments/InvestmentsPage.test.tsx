@@ -36,6 +36,9 @@ const portfolio: readonly InvestmentPortfolioViewModel[] = [
     currentValue: "1909.375",
     gain: "659.375",
     gainPercent: "52.75",
+    costBasisTRY: "1250.00",
+    currentValueTRY: "1909.375",
+    gainTRY: "659.375",
   },
 ];
 
@@ -44,6 +47,7 @@ const lot: InvestmentLotViewModel = {
   instrumentId: "instrument-old",
   instrumentName: "Eski Fon",
   symbol: "ESK",
+  currencyCode: "TRY",
   accountId: "account-old",
   accountName: "Eski yatırım hesabı",
   quantity: "2.5000",
@@ -59,6 +63,7 @@ const sale: InvestmentSaleViewModel = {
   instrumentId: "instrument-old",
   instrumentName: "Eski Fon",
   symbol: "ESK",
+  currencyCode: "TRY",
   destinationAccountId: "account-old",
   destinationAccountName: "Eski yatırım hesabı",
   quantity: "1.2500",

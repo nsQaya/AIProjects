@@ -76,6 +76,81 @@
   margin-top: 16px;
 }
 
+.market-price-toolbar {
+  margin: 12px 0;
+  padding: 12px;
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f7f9f8;
+}
+
+.market-price-toolbar label {
+  min-width: 170px;
+  display: grid;
+  gap: 5px;
+}
+
+.market-price-toolbar label span {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.market-price-toolbar input {
+  min-height: 42px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: white;
+}
+
+.market-price-toolbar > small {
+  width: 100%;
+  color: var(--muted);
+}
+
+.report-filter-panel {
+  position: relative;
+  z-index: 14;
+}
+
+.report-filter-bar {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.report-filter-bar .report-account-filter {
+  min-width: 210px;
+  flex: 1;
+}
+
+.report-filter-bar > button {
+  min-height: 42px;
+}
+
+.report-chart {
+  width: 100%;
+  min-width: 0;
+}
+
+/* ECharts renders into an SVG; keep it out of the design system's icon sizing. */
+.report-chart svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.cost-center-distribution-chart {
+  margin-bottom: 10px;
+}
+
 .cost-center-report .panel-head > strong {
   color: var(--forest-700);
   font-size: 18px;
@@ -84,4 +159,169 @@
 .cost-center-legend {
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   column-gap: 24px;
+}
+
+.report-tabs {
+  margin: 14px 0 16px;
+  padding: 5px;
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f0f3f1;
+}
+
+.report-tabs button {
+  min-height: 38px;
+  padding: 0 14px;
+  flex: 1 0 max-content;
+  color: var(--muted);
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.report-tabs button.active {
+  color: var(--forest-700);
+  background: white;
+  box-shadow: 0 3px 10px rgba(20,40,30,.09);
+}
+
+.report-granularity-filter select {
+  min-width: 125px;
+}
+
+.report-main-panel,
+.report-detail-panel {
+  min-width: 0;
+}
+
+.report-metrics {
+  margin-bottom: 16px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.report-metrics article {
+  padding: 15px 17px;
+  display: grid;
+  gap: 7px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: white;
+}
+
+.report-metrics span {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.report-metrics strong {
+  color: var(--forest-700);
+  font-family: Georgia, serif;
+  font-size: 18px;
+}
+
+.report-table-wrap {
+  width: 100%;
+  margin-top: 16px;
+  overflow-x: auto;
+}
+
+.report-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+}
+
+.report-table th,
+.report-table td {
+  min-width: 105px;
+  padding: 11px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+}
+
+.report-table th {
+  color: var(--muted);
+  font-size: 8px;
+  text-transform: uppercase;
+}
+
+.report-table td:last-child,
+.report-table th:last-child {
+  text-align: right;
+}
+
+.report-table td small {
+  margin-top: 3px;
+  display: block;
+  color: var(--muted);
+}
+
+.report-table .positive { color: var(--forest-700); }
+.report-table .negative { color: #a23f37; }
+
+.report-detail-panel {
+  margin-top: 16px;
+}
+
+.report-drill-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.report-drill-filters label {
+  min-width: 210px;
+  display: grid;
+  gap: 4px;
+}
+
+.report-drill-filters span {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.report-net-worth-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, .7fr) minmax(0, 1.3fr);
+  gap: 16px;
+}
+
+@media (max-width: 620px) {
+  .report-filter-bar > .date-filter,
+  .report-filter-bar > .report-account-filter,
+  .report-filter-bar > button {
+    width: 100%;
+  }
+
+  .report-filter-bar .date-filter input {
+    width: 100%;
+  }
+
+  .report-metrics,
+  .report-net-worth-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .report-drill-filters label,
+  .report-granularity-filter,
+  .report-granularity-filter select {
+    width: 100%;
+  }
+}
+
+@media (min-width: 621px) and (max-width: 980px) {
+  .report-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .report-net-worth-grid { grid-template-columns: 1fr; }
 }

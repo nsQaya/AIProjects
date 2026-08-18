@@ -10,6 +10,8 @@ const dateFormatter = new Intl.DateTimeFormat("tr-TR", {
   year: "numeric",
 });
 
+const editableAmountPattern = /^\d{0,14}(?:,\d{0,6})?$/;
+
 export function toNumber(value: number | string | null | undefined): number {
   const number = Number(value);
   return Number.isFinite(number) ? number : 0;
@@ -17,6 +19,22 @@ export function toNumber(value: number | string | null | undefined): number {
 
 export function money(value: number | string | null | undefined): string {
   return currencyFormatter.format(toNumber(value));
+}
+
+export function moneyInCurrency(
+  value: number | string | null | undefined,
+  currency: string,
+): string {
+  try {
+    return new Intl.NumberFormat("tr-TR", {
+      style: "currency",
+      currency,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 6,
+    }).format(toNumber(value));
+  } catch {
+    return `${toNumber(value).toLocaleString("tr-TR")} ${currency}`;
+  }
 }
 
 export function signedMoney(value: number | string, kind: string): string {
@@ -39,6 +57,12 @@ export function shortMoney(value: number | string): string {
 export function dateText(value: string): string {
   const normalized = value.includes("T") ? value : `${value}T12:00:00`;
   return dateFormatter.format(new Date(normalized));
+}
+
+/** Converts API decimals and typed dots to the Turkish decimal separator. */
+export function editableAmount(value: string): string | null {
+  const localized = value.replace(/\./g, ",");
+  return editableAmountPattern.test(localized) ? localized : null;
 }
 
 export function parseAmount(value: string): number {

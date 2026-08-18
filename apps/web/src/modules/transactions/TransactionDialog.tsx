@@ -10,7 +10,7 @@ import {
 } from "../../components/ui";
 import { isoAtLocalNoon, today } from "../../lib/date";
 import { errorMessage } from "../../lib/error-message";
-import { decimalString } from "../../lib/format";
+import { decimalString, editableAmount } from "../../lib/format";
 import type { TransactionDialogProps, TransactionFormKind } from "./transaction-types";
 
 function formString(values: FormData, key: string): string {
@@ -30,7 +30,9 @@ export function TransactionDialog({
   const [kind, setKind] = useState<TransactionFormKind>(
     () => (transaction?.type.toLowerCase() ?? "expense") as TransactionFormKind,
   );
-  const [amount, setAmount] = useState(() => transaction?.amount ?? "");
+  const [amount, setAmount] = useState(
+    () => editableAmount(transaction?.amount ?? "") ?? "",
+  );
   const [description, setDescription] = useState(
     () => transaction?.title ?? "",
   );
@@ -151,7 +153,17 @@ export function TransactionDialog({
         <label className="amount-field" htmlFor="transaction-amount">
           <span>Tutar</span>
           <div>
-            <input id="transaction-amount" name="amount" inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} required />
+            <input
+              id="transaction-amount"
+              name="amount"
+              inputMode="decimal"
+              value={amount}
+              onChange={(event) => {
+                const nextAmount = editableAmount(event.target.value);
+                if (nextAmount !== null) setAmount(nextAmount);
+              }}
+              required
+            />
             <b>₺</b>
           </div>
         </label>

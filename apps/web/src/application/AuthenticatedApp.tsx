@@ -1,11 +1,10 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import { useAuth } from "../auth/AuthProvider";
 import { Button, InlineFeedback, LoadingState } from "../components/ui";
 import type { TransactionView } from "../finance";
 import { AppLayout } from "../layouts/AppLayout";
-import { ReportsPage } from "../modules/reports";
 import { TransactionDialog } from "../modules/transactions/TransactionDialog";
 import type { TransactionDraft } from "../modules/transactions/transaction-types";
 import { useFinance } from "../providers/FinanceProvider";
@@ -16,6 +15,10 @@ import { InvestmentsRoute } from "./routes/InvestmentsRoute";
 import { SettingsRoute } from "./routes/SettingsRoute";
 import { TransactionsRoute } from "./routes/TransactionsRoute";
 import { UpcomingRoute } from "./routes/UpcomingRoute";
+
+const ReportsPage = lazy(() =>
+  import("../modules/reports").then((module) => ({ default: module.ReportsPage })),
+);
 
 export function AuthenticatedApp() {
   const { logout, session } = useAuth();
@@ -52,10 +55,16 @@ export function AuthenticatedApp() {
       <Route
         path="/reports"
         element={(
-          <ReportsPage
-            costCenters={snapshot.reportCostCenters}
-            items={snapshot.reportItems}
-          />
+          <Suspense fallback={<LoadingState />}>
+            <ReportsPage
+              accounts={snapshot.accounts}
+              analytics={snapshot.reportAnalytics}
+              busy={snapshot.refreshing}
+              loadFailed={snapshot.reportLoadFailed}
+              range={snapshot.reportRange}
+              onFilterChange={(filter) => service.loadReportAnalytics(filter)}
+            />
+          </Suspense>
         )}
       />
       <Route path="/settings" element={<SettingsRoute />} />

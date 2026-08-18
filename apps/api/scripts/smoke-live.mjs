@@ -85,6 +85,12 @@ if (costCenterFiltered.items.length !== 1 || costCenterFiltered.items[0].id !== 
 const expenseBreakdown = (await request(`/api/v1/reports/income-expense?bookId=${book.id}&from=2026-08-01&to=2026-08-31`, { headers: authorization })).payload;
 if (!expenseBreakdown.costCenters.some((item) => item.id === costCenter.id && Number(item.amount) === -125.5)) throw new Error("Cost-center report did not include the live expense");
 const cashflow = (await request(`/api/v1/reports/cash-flow?bookId=${book.id}&from=2026-08-01&to=2026-08-31`, { headers: authorization })).payload;
+const analytics = (await request(`/api/v1/reports/analytics?bookId=${book.id}&from=2026-08-01T00:00:00.000Z&to=2026-08-31T23:59:59.999Z&granularity=day&accountIds=${account.id}`, { headers: authorization })).payload;
+if (!Array.isArray(analytics.trend) || !Array.isArray(analytics.accountBalances?.items)
+  || !Array.isArray(analytics.categoryDetail?.transactions) || !Array.isArray(analytics.liquidity?.items)
+  || !Array.isArray(analytics.netWorth?.items) || analytics.granularity !== "day") {
+  throw new Error("Five-report analytics response is incomplete");
+}
 if (!cashflow.items.some((item) => item.month === "2026-08" && Number(item.expense) === 125.5)) throw new Error(`Cash-flow report did not use the posted live expense: ${JSON.stringify(cashflow)}`);
 
 const restrictedAccount = (await request("/api/v1/accounts", {

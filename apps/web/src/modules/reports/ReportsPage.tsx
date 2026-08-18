@@ -1,20 +1,24 @@
-import type { CSSProperties } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 import type {
   IncomeExpenseCostCenterItemDTO,
   IncomeExpenseReportItemDTO,
+  ReportAnalyticsResponse,
 } from "@defterx/contracts";
 
+import { ReportChart } from "../../components/charts";
+import type { AccountView } from "../../finance";
+import type { ReportRange } from "../../finance/finance-state";
 import { money } from "../../lib/format";
-
-const chartColors = [
-  "#287b60",
-  "#d6a448",
-  "#456fa9",
-  "#a95b54",
-  "#7b68a6",
-  "#6f8d83",
-  "#b77c3a",
-] as const;
+import { ReportFilters } from "./ReportFilters";
+import {
+  accountBalanceOption,
+  categoryDistributionOption,
+  costCenterDistributionOption,
+  liquidityOption,
+  netWorthOption,
+  reportChartColors,
+  trendOption,
+} from "./report-chart-options";
 
 export type ReportCategoryItem = Pick<
   IncomeExpenseReportItemDTO,
@@ -22,148 +26,248 @@ export type ReportCategoryItem = Pick<
 >;
 
 export interface ReportsPageProps {
-  costCenters: readonly IncomeExpenseCostCenterItemDTO[];
-  items: readonly ReportCategoryItem[];
+  accounts?: readonly AccountView[];
+  analytics?: ReportAnalyticsResponse | null;
+  busy?: boolean;
+  /** Geçiş döneminde eski rapor çağrılarının görünümünü korur. */
+  costCenters?: readonly IncomeExpenseCostCenterItemDTO[];
+  /** Geçiş döneminde eski rapor çağrılarının görünümünü korur. */
+  items?: readonly ReportCategoryItem[];
+  loadFailed?: boolean;
+  onFilterChange?: (filter: ReportRange) => Promise<unknown>;
+  range?: ReportRange;
 }
 
-interface ExpenseRow {
-  amount: number;
-  id: string;
-  isActive: boolean;
-  name: string;
+type ReportKey = "trend" | "balances" | "categories" | "liquidity" | "netWorth";
+
+const tabs: ReadonlyArray<{ key: ReportKey; label: string }> = [
+  { key: "trend", label: "Gelir · Gider · Net" },
+  { key: "balances", label: "Hesap bakiyeleri" },
+  { key: "categories", label: "Kategori detayı" },
+  { key: "liquidity", label: "Likidite tahmini" },
+  { key: "netWorth", label: "Varlık ve yatırım" },
+];
+
+function reportDate(value: string): string {
+  return new Intl.DateTimeFormat("tr-TR", { dateStyle: "medium" }).format(new Date(value));
 }
 
-function expenseRows(items: readonly ReportCategoryItem[]): ExpenseRow[] {
-  return items
+function sum(values: readonly string[]): number {
+  return values.reduce((total, value) => total + Number(value), 0);
+}
+
+export function ReportsPage({
+  accounts = [],
+  analytics = null,
+  busy = false,
+  costCenters = [],
+  items = [],
+  loadFailed = false,
+  onFilterChange = () => Promise.resolve(),
+  range = {},
+}: ReportsPageProps) {
+  const [active, setActive] = useState<ReportKey>("trend");
+  const [detailCategoryId, setDetailCategoryId] = useState("");
+  const [detailCostCenterId, setDetailCostCenterId] = useState("");
+
+  const analyticsCategories = useMemo(() => {
+    const grouped = new Map<string, ReportCategoryItem>();
+    for (const row of analytics?.categoryDetail.breakdown ?? []) {
+      const current = grouped.get(row.categoryId);
+      grouped.set(row.categoryId, {
+        id: row.categoryId,
+        name: row.categoryName,
+        type: row.categoryType,
+        isActive: true,
+        amount: String(Number(current?.amount ?? 0) + Number(row.amount)),
+      });
+    }
+    return [...grouped.values()];
+  }, [analytics]);
+  const categoryItems = analytics ? analyticsCategories : items;
+  const expenseRows = categoryItems
     .filter((item) => item.type === "EXPENSE" && Number(item.amount) > 0)
-    .map((item) => ({
-      amount: Number(item.amount),
-      id: item.id,
-      isActive: item.isActive,
-      name: item.name,
-    }))
+    .map((item) => ({ ...item, amount: Number(item.amount) }))
     .sort((left, right) => right.amount - left.amount);
-}
-
-function donutSegments(rows: readonly ExpenseRow[], total: number): string {
-  let degree = 0;
-  const segments = rows.map((row, index) => {
-    const start = degree;
-    degree += total > 0 ? (row.amount / total) * 360 : 0;
-    return `${chartColors[index % chartColors.length]} ${start}deg ${degree}deg`;
-  });
-
-  return segments.join(",") || "#e5e9e6 0deg 360deg";
-}
-
-export function ReportsPage({ costCenters, items }: ReportsPageProps) {
-  const rows = expenseRows(items);
-  const costCenterRows = costCenters
-    .filter((item) => Number(item.amount) < 0)
-    .map((item) => ({
-      amount: -Number(item.amount),
-      id: item.id,
-      isActive: item.isActive,
-      name: item.name,
-    }))
-    .sort((left, right) => right.amount - left.amount);
-  const totalCostCenterExpense = costCenterRows.reduce((sum, item) => sum + item.amount, 0);
-  const totalExpense = rows.reduce((sum, item) => sum + item.amount, 0);
-  const totalIncome = items
+  const totalExpense = expenseRows.reduce((total, item) => total + item.amount, 0);
+  const totalIncome = categoryItems
     .filter((item) => item.type === "INCOME")
-    .reduce((sum, item) => sum + Number(item.amount), 0);
-  const savingsRate = totalIncome
-    ? Math.round(((totalIncome - totalExpense) / totalIncome) * 100)
-    : 0;
+    .reduce((total, item) => total + Number(item.amount), 0);
+  const savingsRate = totalIncome ? Math.round(((totalIncome - totalExpense) / totalIncome) * 100) : 0;
+
+  const analyticsCostCenters = useMemo(() => {
+    const grouped = new Map<string, { amount: number; id: string; isActive: boolean; name: string }>();
+    for (const row of analytics?.categoryDetail.breakdown ?? []) {
+      if (!row.costCenterId || !row.costCenterName || row.categoryType !== "EXPENSE") continue;
+      const current = grouped.get(row.costCenterId);
+      grouped.set(row.costCenterId, {
+        id: row.costCenterId,
+        name: row.costCenterName,
+        isActive: true,
+        amount: (current?.amount ?? 0) + Number(row.amount),
+      });
+    }
+    return [...grouped.values()];
+  }, [analytics]);
+  const costCenterRows = analytics
+    ? analyticsCostCenters.sort((left, right) => right.amount - left.amount)
+    : costCenters
+      .filter((item) => Number(item.amount) < 0)
+      .map((item) => ({ ...item, amount: -Number(item.amount) }))
+      .sort((left, right) => right.amount - left.amount);
+  const totalCostCenterExpense = costCenterRows.reduce((total, item) => total + item.amount, 0);
+  const detailTransactions = (analytics?.categoryDetail.transactions ?? []).filter((transaction) =>
+    (!detailCategoryId || transaction.categoryId === detailCategoryId)
+    && (!detailCostCenterId || transaction.costCenterId === detailCostCenterId));
+
   const boundedRate = Math.max(0, Math.min(100, savingsRate));
-  const donutStyle = {
-    "--segments": donutSegments(rows, totalExpense),
-  } as CSSProperties;
   const scoreStyle: CSSProperties = {
     background: `radial-gradient(closest-side,#f5f8f6 78%,transparent 79% 100%),conic-gradient(var(--forest-700) ${boundedRate}%,#dce7e1 0)`,
   };
 
   return (
-    <section className="page-section">
-      <div className="report-grid">
-        <article className="panel">
-          <header className="panel-head">
-            <div>
-              <h2>Kategori dağılımı</h2>
-              <p>Bu ayın canlı gider kayıtları</p>
-            </div>
-          </header>
-          <div className="donut-layout">
-            <div className="donut" style={donutStyle}>
-              <span>
-                <small>Toplam gider</small>
-                <strong>{money(totalExpense)}</strong>
-              </span>
-            </div>
-            <div className="report-legend">
-              {rows.map((row, index) => (
-                <div key={row.id} data-report-category={row.id}>
-                  <i
-                    aria-hidden="true"
-                    style={{ "--dot": chartColors[index % chartColors.length] } as CSSProperties}
-                  />
-                  <span>
-                    {row.name}
-                    {row.isActive ? "" : " (pasif)"}
-                  </span>
-                  <b>
-                    %{totalExpense ? Math.round((row.amount / totalExpense) * 100) : 0}
-                  </b>
+    <section className="page-section reports-workspace">
+      <ReportFilters accounts={accounts} busy={busy} value={range} onApply={onFilterChange} />
+
+      <nav className="report-tabs" aria-label="Raporlar">
+        {tabs.map((tab) => (
+          <button key={tab.key} type="button" className={active === tab.key ? "active" : ""}
+            aria-current={active === tab.key ? "page" : undefined} onClick={() => setActive(tab.key)}>
+            {tab.label}
+          </button>
+        ))}
+      </nav>
+
+      {!analytics && items.length === 0 && costCenters.length === 0 ? (
+        <article className="panel empty-state">
+          {loadFailed
+            ? "Rapor verileri yüklenemedi. Filtreleri kontrol edip Raporu uygula ile yeniden deneyin."
+            : "Rapor verileri hazırlanıyor."}
+        </article>
+      ) : null}
+
+      {active === "trend" && analytics ? (
+        <>
+          <div className="report-metrics">
+            <article><span>Gelir</span><strong>{money(sum(analytics.trend.map((item) => item.income)))}</strong></article>
+            <article><span>Gider</span><strong>{money(sum(analytics.trend.map((item) => item.expense)))}</strong></article>
+            <article><span>Net</span><strong>{money(sum(analytics.trend.map((item) => item.net)))}</strong></article>
+            <article><span>Dönem sonu bakiye</span><strong>{money(Number(analytics.trend.at(-1)?.balance ?? 0))}</strong></article>
+          </div>
+          <article className="panel report-main-panel">
+            <header className="panel-head"><div><h2>Gelir–Gider–Net Trendi</h2><p>Dönemsel hareket ve seçili hesapların birleşik bakiyesi</p></div></header>
+            <ReportChart busy={busy} height={390} label="Gelir gider net trendi" option={trendOption(analytics.trend)} />
+          </article>
+        </>
+      ) : null}
+
+      {active === "balances" && analytics ? (
+        <article className="panel report-main-panel">
+          <header className="panel-head"><div><h2>Hesap Bakiyesi Gelişimi</h2><p>Her hesabın dönem sonu bakiyesi ayrı çizgide gösterilir</p></div></header>
+          <ReportChart busy={busy} height={410} label="Hesap bakiyesi gelişimi" option={accountBalanceOption(analytics.accountBalances)} />
+          <div className="report-table-wrap"><table className="report-table"><thead><tr><th>Hesap</th><th>Son bakiye</th></tr></thead><tbody>
+            {analytics.accountBalances.accounts.map((account) => {
+              const latest = analytics.accountBalances.items.filter((item) => item.accountId === account.id).at(-1);
+              return <tr key={account.id}><td>{account.name}</td><td>{money(Number(latest?.balance ?? 0))}</td></tr>;
+            })}
+          </tbody></table></div>
+        </article>
+      ) : null}
+
+      {active === "categories" ? (
+        <>
+          <div className="report-grid">
+            <article className="panel">
+              <header className="panel-head"><div><h2>Kategori dağılımı</h2><p>Seçilen tarih ve hesapların gider kayıtları</p></div></header>
+              <div className="distribution-layout">
+                <ReportChart busy={busy} height={250} label="Kategori bazında gider dağılımı" option={categoryDistributionOption(expenseRows, totalExpense)} />
+                <div className="report-legend">
+                  {expenseRows.map((row, index) => (
+                    <div key={row.id} data-report-category={row.id}>
+                      <i aria-hidden="true" style={{ "--dot": reportChartColors[index % reportChartColors.length] } as CSSProperties} />
+                      <span>{row.name}{row.isActive ? "" : " (pasif)"}</span>
+                      <b>%{totalExpense ? Math.round((row.amount / totalExpense) * 100) : 0}</b>
+                      <strong>{money(row.amount)}</strong>
+                    </div>
+                  ))}
+                  {expenseRows.length === 0 ? <div className="empty-state">Seçilen filtrelerde gider kaydı yok.</div> : null}
+                </div>
+              </div>
+            </article>
+            <article className="panel savings-card">
+              <span>Seçili dönem net / gelir</span><strong>%{savingsRate}</strong>
+              <div className="score-ring" style={scoreStyle}><b>{savingsRate}</b><small>/100</small></div>
+              <p>Oran filtrelenmiş gelir ve gider toplamlarından hesaplanır.</p>
+            </article>
+          </div>
+          <article className="panel cost-center-report">
+            <header className="panel-head"><div><h2>Masraf merkezi dağılımı</h2><p>Masraf merkezi atanmış giderler</p></div><strong>{money(totalCostCenterExpense)}</strong></header>
+            {costCenterRows.length > 0 ? <ReportChart busy={busy} height={Math.max(220, costCenterRows.length * 42)} label="Masraf merkezi bazında gider dağılımı" option={costCenterDistributionOption(costCenterRows)} /> : null}
+            <div className="report-legend cost-center-legend">
+              {costCenterRows.map((row, index) => (
+                <div key={row.id} data-report-cost-center={row.id}>
+                  <i aria-hidden="true" style={{ "--dot": reportChartColors[index % reportChartColors.length] } as CSSProperties} />
+                  <span>{row.name}{row.isActive ? "" : " (pasif)"}</span>
+                  <b>%{totalCostCenterExpense ? Math.round((row.amount / totalCostCenterExpense) * 100) : 0}</b>
                   <strong>{money(row.amount)}</strong>
                 </div>
               ))}
-              {rows.length === 0 ? (
-                <div className="empty-state">Bu ay gider kaydı yok.</div>
-              ) : null}
             </div>
-          </div>
-        </article>
-
-        <article className="panel savings-card">
-          <span>Bu ay net / gelir</span>
-          <strong>%{savingsRate}</strong>
-          <div className="score-ring" style={scoreStyle}>
-            <b>{savingsRate}</b>
-            <small>/100</small>
-          </div>
-          <p>Oran canlı gelir ve gider toplamlarından hesaplanır.</p>
-        </article>
-      </div>
-
-      <article className="panel cost-center-report">
-        <header className="panel-head">
-          <div>
-            <h2>Masraf merkezi dağılımı</h2>
-            <p>Bu ay masraf merkezi atanmış canlı gider kayıtları</p>
-          </div>
-          <strong>{money(totalCostCenterExpense)}</strong>
-        </header>
-        <div className="report-legend cost-center-legend">
-          {costCenterRows.map((row, index) => (
-            <div key={row.id} data-report-cost-center={row.id}>
-              <i
-                aria-hidden="true"
-                style={{ "--dot": chartColors[index % chartColors.length] } as CSSProperties}
-              />
-              <span>{row.name}{row.isActive ? "" : " (pasif)"}</span>
-              <b>
-                %{totalCostCenterExpense
-                  ? Math.round((row.amount / totalCostCenterExpense) * 100)
-                  : 0}
-              </b>
-              <strong>{money(row.amount)}</strong>
-            </div>
-          ))}
-          {costCenterRows.length === 0 ? (
-            <div className="empty-state">Bu ay masraf merkezi atanmış gider yok.</div>
+          </article>
+          {analytics ? (
+            <article className="panel report-detail-panel">
+              <header className="panel-head"><div><h2>Kategori → Masraf Merkezi → İşlem</h2><p>Bir kırılım seçerek kaynak işlemlere inin</p></div></header>
+              <div className="report-drill-filters">
+                <label><span>Kategori</span><select value={detailCategoryId} onChange={(event) => setDetailCategoryId(event.target.value)}><option value="">Tüm kategoriler</option>{analyticsCategories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                <label><span>Masraf merkezi</span><select value={detailCostCenterId} onChange={(event) => setDetailCostCenterId(event.target.value)}><option value="">Tüm merkezler</option>{costCenterRows.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+              </div>
+              <div className="report-table-wrap"><table className="report-table"><thead><tr><th>Tarih</th><th>İşlem</th><th>Kategori</th><th>Masraf merkezi</th><th>Hesap</th><th>Tutar</th></tr></thead><tbody>
+                {detailTransactions.map((transaction) => <tr key={transaction.id}><td>{reportDate(transaction.transactionDate)}</td><td>{transaction.title}</td><td>{transaction.categoryName ?? "—"}</td><td>{transaction.costCenterName ?? "—"}</td><td>{transaction.accountName ?? "—"}</td><td>{money(Number(transaction.amount))}</td></tr>)}
+                {detailTransactions.length === 0 ? <tr><td colSpan={6}>Seçilen kırılımda işlem yok.</td></tr> : null}
+              </tbody></table></div>
+            </article>
           ) : null}
-        </div>
-      </article>
+        </>
+      ) : null}
+
+      {active === "liquidity" && analytics ? (
+        <>
+          <div className="report-metrics">
+            <article><span>Başlangıç bakiyesi</span><strong>{money(Number(analytics.liquidity.openingBalance))}</strong></article>
+            <article><span>Beklenen giriş</span><strong>{money(sum(analytics.liquidity.items.map((item) => item.inflow)))}</strong></article>
+            <article><span>Beklenen çıkış</span><strong>{money(sum(analytics.liquidity.items.map((item) => item.outflow)))}</strong></article>
+            <article><span>Tahmini dönem sonu</span><strong>{money(Number(analytics.liquidity.items.at(-1)?.projectedBalance ?? analytics.liquidity.openingBalance))}</strong></article>
+          </div>
+          <article className="panel report-main-panel">
+            <header className="panel-head"><div><h2>Likidite ve Nakit Tahmini</h2><p>Mevcut bakiye ile bekleyen planlı işlemlerin birleşik projeksiyonu</p></div></header>
+            <ReportChart busy={busy} height={390} label="Likidite ve nakit tahmini" option={liquidityOption(analytics.liquidity.items)} />
+            <div className="report-table-wrap"><table className="report-table"><thead><tr><th>Tarih</th><th>Planlı işlem</th><th>Tür</th><th>Etki</th></tr></thead><tbody>
+              {analytics.liquidity.events.map((event) => <tr key={event.id}><td>{reportDate(event.scheduledAt)}</td><td>{event.title}</td><td>{event.type}</td><td className={Number(event.impact) >= 0 ? "positive" : "negative"}>{money(Number(event.impact))}</td></tr>)}
+              {analytics.liquidity.events.length === 0 ? <tr><td colSpan={4}>Seçilen tarihlerde bekleyen planlı işlem yok.</td></tr> : null}
+            </tbody></table></div>
+          </article>
+        </>
+      ) : null}
+
+      {active === "netWorth" && analytics ? (
+        <>
+          <div className="report-metrics">
+            <article><span>Toplam varlık</span><strong>{money(Number(analytics.netWorth.totalAssets))}</strong></article>
+            <article><span>Yatırım maliyeti</span><strong>{money(Number(analytics.netWorth.investmentCost))}</strong></article>
+            <article><span>Gerçekleşen getiri</span><strong>{money(Number(analytics.netWorth.realizedGain))}</strong></article>
+            <article><span>Gerçekleşmemiş getiri</span><strong>{money(Number(analytics.netWorth.unrealizedGain))}</strong></article>
+          </div>
+          <div className="report-net-worth-grid">
+            <article className="panel"><header className="panel-head"><div><h2>Toplam Varlık</h2><p>Seçili hesaplar ve son bilinen yatırım fiyatları</p></div></header><ReportChart busy={busy} height={330} label="Toplam varlık dağılımı" option={netWorthOption(analytics.netWorth)} /></article>
+            <article className="panel report-main-panel"><header className="panel-head"><div><h2>Yatırım Performansı</h2><p>Bitiş tarihindeki pozisyon ve seçili dönemde gerçekleşen getiri</p></div></header>
+              <div className="report-table-wrap"><table className="report-table"><thead><tr><th>Varlık</th><th>Maliyet</th><th>Güncel değer</th><th>Gerçekleşen</th><th>Gerçekleşmemiş</th></tr></thead><tbody>
+                {analytics.netWorth.items.map((item) => <tr key={item.instrumentId}><td><b>{item.name}</b><small>{item.symbol ?? item.assetTypeName}</small></td><td>{money(Number(item.costBasis))}</td><td>{item.currentValue === null ? "Fiyat yok" : money(Number(item.currentValue))}</td><td>{money(Number(item.realizedGain))}</td><td>{item.unrealizedGain === null ? "—" : money(Number(item.unrealizedGain))}</td></tr>)}
+                {analytics.netWorth.items.length === 0 ? <tr><td colSpan={5}>Seçilen kapsamda yatırım kaydı yok.</td></tr> : null}
+              </tbody></table></div>
+            </article>
+          </div>
+        </>
+      ) : null}
     </section>
   );
 }

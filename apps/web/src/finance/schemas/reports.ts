@@ -89,6 +89,95 @@ export const incomeExpenseReportSchema = z.object({
   ),
 });
 
+const accountBalanceSeriesItemSchema = z.object({
+  period: z.string(),
+  periodStart: isoDateTimeSchema,
+  accountId: uuidSchema,
+  balance: decimalStringSchema,
+});
+
+const reportTransactionDetailSchema = z.object({
+  id: uuidSchema,
+  type: clientTransactionTypeSchema,
+  title: z.string(),
+  transactionDate: isoDateTimeSchema,
+  categoryId: uuidSchema.nullable(),
+  categoryName: z.string().nullable(),
+  costCenterId: uuidSchema.nullable(),
+  costCenterName: z.string().nullable(),
+  accountName: z.string().nullable(),
+  currencyCode: currencyCodeSchema,
+  amount: decimalStringSchema,
+});
+
+export const reportAnalyticsSchema = z.object({
+  from: isoDateTimeSchema,
+  to: isoDateTimeSchema,
+  granularity: cashFlowGranularitySchema,
+  currencyCode: currencyCodeSchema,
+  trend: z.array(cashFlowItemSchema),
+  accountBalances: z.object({
+    accounts: z.array(z.object({
+      id: uuidSchema,
+      name: z.string(),
+      currencyCode: currencyCodeSchema,
+    })),
+    items: z.array(accountBalanceSeriesItemSchema),
+  }),
+  categoryDetail: z.object({
+    breakdown: z.array(z.object({
+      categoryId: uuidSchema,
+      categoryName: z.string(),
+      categoryType: categoryTypeSchema,
+      costCenterId: uuidSchema.nullable(),
+      costCenterName: z.string().nullable(),
+      amount: decimalStringSchema,
+    })),
+    transactions: z.array(reportTransactionDetailSchema),
+  }),
+  liquidity: z.object({
+    openingBalance: decimalStringSchema,
+    items: z.array(z.object({
+      period: z.string(),
+      periodStart: isoDateTimeSchema,
+      inflow: decimalStringSchema,
+      outflow: decimalStringSchema,
+      net: decimalStringSchema,
+      projectedBalance: decimalStringSchema,
+    })),
+    events: z.array(z.object({
+      id: uuidSchema,
+      title: z.string(),
+      scheduledAt: isoDateTimeSchema,
+      type: scheduledTransactionTypeSchema,
+      impact: decimalStringSchema,
+    })),
+  }),
+  netWorth: z.object({
+    cashBalance: decimalStringSchema,
+    investmentCost: decimalStringSchema,
+    investmentValue: decimalStringSchema,
+    realizedGain: decimalStringSchema,
+    unrealizedGain: decimalStringSchema,
+    totalAssets: decimalStringSchema,
+    items: z.array(z.object({
+      instrumentId: uuidSchema,
+      name: z.string(),
+      symbol: z.string().nullable(),
+      assetTypeName: z.string(),
+      currencyCode: currencyCodeSchema,
+      quantity: decimalStringSchema,
+      costBasis: decimalStringSchema,
+      currentValue: decimalStringSchema.nullable(),
+      realizedGain: decimalStringSchema,
+      unrealizedGain: decimalStringSchema.nullable(),
+      latestPriceAt: isoDateTimeSchema.nullable(),
+      currentValueTRY: decimalStringSchema.nullable(),
+      unrealizedGainTRY: decimalStringSchema.nullable(),
+    })),
+  }),
+});
+
 export const balanceReportItemSchema = z.object({
   id: uuidSchema,
   name: z.string(),

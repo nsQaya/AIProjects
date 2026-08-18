@@ -3,8 +3,22 @@ import type { AppEnv } from "../../config/bindings";
 import { AppError } from "../../common/errors";
 import type { DbClient } from "../../infrastructure/database";
 import { requireBookRole } from "../../middleware/book-access";
+import { loadReportAnalytics } from "./report.analytics";
 
 export const reportRoutes = new Hono<AppEnv>();
+
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function accountScope(rawAccountIds: string | undefined) {
+  const includeAllAccounts = rawAccountIds === undefined || rawAccountIds === "all";
+  const accountIds = includeAllAccounts || rawAccountIds === "none"
+    ? []
+    : rawAccountIds.split(",").filter(Boolean);
+  if (accountIds.length > 200 || accountIds.some((id) => !uuidPattern.test(id))) {
+    throw new AppError(422,"INVALID_ACCOUNT_FILTER","Account filter contains an invalid identifier");
+  }
+  return { accountIds, includeAllAccounts };
+}
 
 async function context(c: any) {
   const pool = c.get("database");
@@ -15,6 +29,7 @@ async function context(c: any) {
     pool,bookId,
     from:c.req.query("from") ?? new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),1)).toISOString(),
     to:c.req.query("to") ?? now.toISOString(),
+    ...accountScope(c.req.query("accountIds")),
   };
 }
 
@@ -34,6 +49,8 @@ export async function loadIncomeExpenseReport(
   bookId: string,
   from: string,
   to: string,
+  accountIds: readonly string[] = [],
+  includeAllAccounts = true,
 ) {
   const [result,costCenters] = await Promise.all([pool.query(
     `SELECT c.id,c.name,c.category_type AS type,c.is_active AS "isActive",
@@ -42,8 +59,14 @@ export async function loadIncomeExpenseReport(
      FROM categories c JOIN transaction_entries e ON e.account_id=c.system_account_id
      JOIN transactions t ON t.id=e.transaction_id
      WHERE c.book_id=$1 AND t.status IN ('POSTED','REVERSED') AND t.transaction_date BETWEEN $2 AND $3
+       AND ($5::boolean OR EXISTS (
+         SELECT 1 FROM transaction_entries scoped_e
+         JOIN accounts scoped_a ON scoped_a.id=scoped_e.account_id
+         WHERE scoped_e.transaction_id=t.id AND scoped_a.is_system=false
+           AND scoped_e.account_id=ANY($4::uuid[])
+       ))
      GROUP BY c.id ORDER BY c.category_type,c.name`,
-    [bookId,from,to],
+    [bookId,from,to,accountIds,includeAllAccounts],
   ),pool.query(
     `SELECT cc.id,cc.name,cc.is_active AS "isActive",
             COALESCE(SUM(CASE
@@ -59,8 +82,14 @@ export async function loadIncomeExpenseReport(
      WHERE cc.book_id=$1 AND t.status IN ('POSTED','REVERSED')
        AND t.transaction_date BETWEEN $2 AND $3
        AND a.account_type IN ('SYSTEM_INCOME','SYSTEM_EXPENSE')
+       AND ($5::boolean OR EXISTS (
+         SELECT 1 FROM transaction_entries scoped_e
+         JOIN accounts scoped_a ON scoped_a.id=scoped_e.account_id
+         WHERE scoped_e.transaction_id=t.id AND scoped_a.is_system=false
+           AND scoped_e.account_id=ANY($4::uuid[])
+       ))
      GROUP BY cc.id ORDER BY cc.sort_order,cc.name`,
-    [bookId,from,to],
+    [bookId,from,to,accountIds,includeAllAccounts],
   )]);
   return {items:result.rows,costCenters:costCenters.rows};
 }
@@ -104,18 +133,9 @@ reportRoutes.get("/dashboard",async (c) => {
 });
 
 reportRoutes.get("/cash-flow",async (c) => {
-  const {pool,bookId,from,to} = await context(c);
+  const {pool,bookId,from,to,accountIds,includeAllAccounts} = await context(c);
   const requested=c.req.query("granularity")??"month";
   const granularity=["day","week","month","year"].includes(requested)?requested:"month";
-  const rawAccountIds=c.req.query("accountIds");
-  const includeAllAccounts=rawAccountIds===undefined||rawAccountIds==="all";
-  const accountIds=includeAllAccounts||rawAccountIds==="none"
-    ?[]
-    :rawAccountIds.split(",").filter(Boolean);
-  const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  if(accountIds.length>200||accountIds.some((id)=>!uuid.test(id))){
-    throw new AppError(422,"INVALID_ACCOUNT_FILTER","Account filter contains an invalid identifier");
-  }
   const intervals:Record<string,string>={day:"1 day",week:"1 week",month:"1 month",year:"1 year"};
   const formats:Record<string,string>={day:"YYYY-MM-DD",week:"YYYY-MM-DD",month:"YYYY-MM",year:"YYYY"};
   const interval=intervals[granularity]!;
@@ -154,9 +174,27 @@ reportRoutes.get("/cash-flow",async (c) => {
   return c.json({items:result.rows,granularity,from,to});
 });
 
+reportRoutes.get("/analytics",async (c) => {
+  const {pool,bookId,from,to,accountIds,includeAllAccounts} = await context(c);
+  const requested=c.req.query("granularity")??"month";
+  const granularity=(['day','week','month','year'] as const).find((value)=>value===requested)??"month";
+  const fromDate=new Date(from),toDate=new Date(to);
+  if(!Number.isFinite(fromDate.getTime())||!Number.isFinite(toDate.getTime())||fromDate>toDate){
+    throw new AppError(422,"INVALID_REPORT_RANGE","Report date range is invalid");
+  }
+  const rangeDays=(toDate.getTime()-fromDate.getTime())/86_400_000;
+  const maximumDays={day:370,week:3_700,month:11_000,year:36_600}[granularity];
+  if(rangeDays>maximumDays){
+    throw new AppError(422,"REPORT_RESOLUTION_TOO_DETAILED","Select a coarser grouping for this report date range");
+  }
+  return c.json(await loadReportAnalytics(pool,{
+    accountIds,bookId,from,granularity,includeAllAccounts,to,
+  }));
+});
+
 reportRoutes.get("/income-expense",async (c) => {
-  const {pool,bookId,from,to} = await context(c);
-  return c.json(await loadIncomeExpenseReport(pool,bookId,from,to));
+  const {pool,bookId,from,to,accountIds,includeAllAccounts} = await context(c);
+  return c.json(await loadIncomeExpenseReport(pool,bookId,from,to,accountIds,includeAllAccounts));
 });
 
 reportRoutes.get("/balances",async (c) => {

@@ -1,13 +1,18 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   CategoryDTO,
   CostCenterDTO,
+  CurrencyRateAtDateDTO,
+  CurrencyRateSyncRunDTO,
   InvestmentAssetTypeDTO,
   InvestmentInstrumentDTO,
+  InvestmentPriceAtDateDTO,
+  MarketPriceSyncRunDTO,
 } from "@defterx/contracts";
 
 import { InlineFeedback } from "../../components/ui";
-import { dateText, money } from "../../lib/format";
+import { today } from "../../lib/date";
+import { moneyInCurrency } from "../../lib/format";
 import {
   CategoryDialog,
   CostCenterDialog,
@@ -55,7 +60,81 @@ export function SettingsPage({
   const [dialog, setDialog] = useState<SettingsDialogState | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [priceDate,setPriceDate]=useState(today());
+  const [datedPrices,setDatedPrices]=useState<readonly InvestmentPriceAtDateDTO[]>([]);
+  const [priceLoading,setPriceLoading]=useState(true);
+  const [syncRun,setSyncRun]=useState<MarketPriceSyncRunDTO|null>(null);
+  const [rateDate,setRateDate]=useState(today());
+  const [datedRates,setDatedRates]=useState<readonly CurrencyRateAtDateDTO[]>([]);
+  const [rateLoading,setRateLoading]=useState(true);
+  const [currencySyncRun,setCurrencySyncRun]=useState<CurrencyRateSyncRunDTO|null>(null);
   const online = model.apiStatus.online;
+  const datedPriceMap=useMemo(()=>new Map(datedPrices.map(item=>[item.instrumentId,item])),[datedPrices]);
+  const datedRateMap=useMemo(()=>new Map(datedRates.map(item=>[item.currencyCode,item])),[datedRates]);
+
+  useEffect(()=>{
+    let active=true;
+    void Promise.all([
+      actions.onLoadInstrumentPrices(priceDate),
+      actions.onMarketPriceSyncStatus(priceDate),
+    ]).then(([prices,run])=>{
+      if(active){setDatedPrices(prices);setSyncRun(run);}
+    }).catch(error=>{if(active)setActionError(actionErrorMessage(error));})
+      .finally(()=>{if(active)setPriceLoading(false);});
+    return()=>{active=false;};
+  },[actions,priceDate]);
+
+  useEffect(()=>{
+    if(syncRun?.status!=="QUEUED"&&syncRun?.status!=="RUNNING")return;
+    const timer=window.setInterval(()=>{
+      void actions.onMarketPriceSyncStatus(priceDate).then(async run=>{
+        setSyncRun(run);
+        if(run?.status==="COMPLETED")setDatedPrices(await actions.onLoadInstrumentPrices(priceDate));
+      }).catch(()=>undefined);
+    },4000);
+    return()=>window.clearInterval(timer);
+  },[actions,priceDate,syncRun?.status]);
+
+  const syncMarketPrices=async()=>{
+    if(priceLoading)return;
+    setPriceLoading(true);
+    setActionError(null);
+    try{setSyncRun(await actions.onSyncMarketPrices(priceDate));}
+    catch(error){setActionError(actionErrorMessage(error));}
+    finally{setPriceLoading(false);}
+  };
+
+  useEffect(()=>{
+    let active=true;
+    void Promise.all([
+      actions.onLoadCurrencyRates(rateDate),
+      actions.onCurrencyRateSyncStatus(rateDate),
+    ]).then(([rates,run])=>{
+      if(active){setDatedRates(rates);setCurrencySyncRun(run);}
+    }).catch(error=>{if(active)setActionError(actionErrorMessage(error));})
+      .finally(()=>{if(active)setRateLoading(false);});
+    return()=>{active=false;};
+  },[actions,rateDate]);
+
+  useEffect(()=>{
+    if(currencySyncRun?.status!=="QUEUED"&&currencySyncRun?.status!=="RUNNING")return;
+    const timer=window.setInterval(()=>{
+      void actions.onCurrencyRateSyncStatus(rateDate).then(async run=>{
+        setCurrencySyncRun(run);
+        if(run?.status==="COMPLETED")setDatedRates(await actions.onLoadCurrencyRates(rateDate));
+      }).catch(()=>undefined);
+    },4000);
+    return()=>window.clearInterval(timer);
+  },[actions,rateDate,currencySyncRun?.status]);
+
+  const syncCurrencyRates=async()=>{
+    if(rateLoading)return;
+    setRateLoading(true);
+    setActionError(null);
+    try{setCurrencySyncRun(await actions.onSyncCurrencyRates(rateDate));}
+    catch(error){setActionError(actionErrorMessage(error));}
+    finally{setRateLoading(false);}
+  };
 
   const runAction = async (key: string, action: () => Promise<void>) => {
     if (pendingAction !== null) return;
@@ -407,12 +486,26 @@ export function SettingsPage({
               + Araç
             </button>
           </header>
+          <div className="market-price-toolbar">
+            <label>
+              <span>Fiyat tarihi</span>
+              <input type="date" value={priceDate} onChange={event=>{setPriceLoading(true);setPriceDate(event.target.value);}} />
+            </label>
+            <button className="secondary-button" type="button" disabled={priceLoading||syncRun?.status==="QUEUED"||syncRun?.status==="RUNNING"} onClick={()=>void syncMarketPrices()}>
+              {syncRun?.status==="QUEUED"||syncRun?.status==="RUNNING"?"Tüm piyasa güncelleniyor…":"Tüm piyasanın fiyatını güncelle"}
+            </button>
+            {syncRun?<small>
+              {syncRun.status==="COMPLETED"
+                ? `${syncRun.updatedItems} fiyat güncellendi · ${syncRun.missingItems} kodda o gün fiyat yok`
+                : syncRun.status==="FAILED"?"Fiyat güncellemesi tamamlanamadı.":`${syncRun.processedItems}/${syncRun.totalItems} kod işlendi`}
+            </small>:null}
+          </div>
           <div className="management-list compact-list">
             {model.instruments.map((item) => {
-              const latestPriceText =
-                item.latestPrice !== null && item.latestPriceAt !== null
-                  ? `${money(item.latestPrice)} · ${dateText(item.latestPriceAt)}`
-                  : "Fiyat yok";
+              const datedPrice=datedPriceMap.get(item.id);
+              const latestPriceText=priceLoading&&!datedPrice
+                ? "Fiyat yükleniyor…"
+                : `${moneyInCurrency(datedPrice?.price??0,item.currencyCode)} · ${datedPrice?.available?(datedPrice.source==="YAHOO"?"Yahoo kapanış":"Manuel fiyat"):"O gün fiyat yok"}`;
               const deleteKey = `delete-instrument:${item.id}`;
               const activateKey = `activate-instrument:${item.id}`;
               return (
@@ -428,14 +521,15 @@ export function SettingsPage({
                     </small>
                   </span>
                   <span className="row-actions">
-                    <button
-                      type="button"
-                      data-price-instrument={item.id}
-                      disabled={pendingAction !== null}
-                      onClick={() => setDialog({ type: "price", item })}
-                    >
-                      Fiyat gir
-                    </button>
+                    {item.marketSymbolId?(
+                      <button type="button" data-sync-instrument={item.id} disabled={pendingAction!==null||priceLoading} onClick={()=>void syncMarketPrices()}>
+                        Fiyatı güncelle
+                      </button>
+                    ):(
+                      <button type="button" data-price-instrument={item.id} disabled={pendingAction !== null} onClick={() => setDialog({ type: "price", item })}>
+                        Elle fiyat gir
+                      </button>
+                    )}
                     <button
                       type="button"
                       data-edit-instrument={item.id}
@@ -485,6 +579,79 @@ export function SettingsPage({
             ) : null}
           </div>
         </article>
+
+        <article className="panel settings-card">
+          <h2>Para Birimleri</h2>
+          <div className="market-price-toolbar">
+            <label>
+              <span>Kur tarihi</span>
+              <input type="date" value={rateDate} onChange={event=>{setRateLoading(true);setRateDate(event.target.value);}} />
+            </label>
+            <button className="secondary-button" type="button" disabled={rateLoading||currencySyncRun?.status==="QUEUED"||currencySyncRun?.status==="RUNNING"} onClick={()=>void syncCurrencyRates()}>
+              {currencySyncRun?.status==="QUEUED"||currencySyncRun?.status==="RUNNING"?"Kurlar güncelleniyor…":"TCMB kurlarını güncelle"}
+            </button>
+            {currencySyncRun?<small>
+              {currencySyncRun.status==="COMPLETED"
+                ? `${currencySyncRun.updatedItems} kur güncellendi`
+                : currencySyncRun.status==="FAILED"?"Kur güncellemesi tamamlanamadı.":`${currencySyncRun.processedItems}/${currencySyncRun.totalItems} kur işlendi`}
+            </small>:null}
+          </div>
+          <div className="management-list compact-list">
+            {model.currencies.map((item) => {
+              const rate=datedRateMap.get(item.code);
+              const enableKey=`enable-currency:${item.code}`;
+              const disableKey=`disable-currency:${item.code}`;
+              return (
+                <div key={item.code}>
+                  <span>
+                    <b>{item.code} <small>{item.nameTr}</small></b>
+                    {item.isEnabled ? (
+                      <small>
+                        {item.code==="TRY"
+                          ? "Baz para birimi"
+                          : rateLoading&&!rate ? "Kur yükleniyor…"
+                          : rate?.available ? `${moneyInCurrency(rate.tryRate,"TRY")}`
+                          : "O gün kur yok"}
+                      </small>
+                    ) : null}
+                  </span>
+                  {item.code==="TRY" ? null : (
+                    <span className="row-actions">
+                      {item.isEnabled ? (
+                        <button
+                          type="button"
+                          className="danger-link"
+                          data-disable-currency={item.code}
+                          disabled={pendingAction !== null}
+                          onClick={() =>
+                            runConfirmedAction(
+                              disableKey,
+                              `“${item.nameTr}” kaldırılsın mı?`,
+                              () => actions.onDisableCurrency(item.code),
+                            )
+                          }
+                        >
+                          {pendingAction === disableKey ? "İşleniyor…" : "Kaldır"}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          data-enable-currency={item.code}
+                          disabled={pendingAction !== null}
+                          onClick={() =>
+                            void runAction(enableKey, () => actions.onEnableCurrency(item.code))
+                          }
+                        >
+                          {pendingAction === enableKey ? "Ekleniyor…" : "Ekle"}
+                        </button>
+                      )}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </article>
       </div>
 
       {dialog?.type === "category" ? (
@@ -514,8 +681,10 @@ export function SettingsPage({
       {dialog?.type === "instrument" ? (
         <InstrumentDialog
           key={`instrument:${dialog.item?.id ?? "new"}`}
+          currencies={model.currencies}
           instrument={dialog.item}
           investmentTypes={model.investmentTypes}
+          onSearchMarketSymbols={actions.onSearchMarketSymbols}
           onClose={() => setDialog(null)}
           onSave={actions.onSaveInstrument}
         />
