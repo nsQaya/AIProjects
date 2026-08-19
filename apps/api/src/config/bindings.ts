@@ -56,7 +56,14 @@ export type BackgroundJob =
     }
   | { type: "PLAN_MARKET_SPLITS" }
   | { type: "FETCH_MARKET_SPLIT_BATCH"; items: Array<{ id: string; symbol: string }> }
-  | { type: "SYNC_CURRENCY_RATES"; targetDate: string };
+  | { type: "SYNC_CURRENCY_RATES"; targetDate: string }
+  | {
+      type: "FETCH_FUND_PRICE_BATCH";
+      runId: string;
+      targetDate: string;
+      batchKey: string;
+      items: Array<{ id: string; symbol: string }>;
+    };
 
 export interface AuthUser { id: string; email: string }
 

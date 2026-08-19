@@ -6,6 +6,7 @@ import {
   fetchYahooSplits,
   type MarketCatalogItem,
 } from "./market-data.provider";
+import { fetchFintablesFundPrices } from "../funds/fund.provider";
 
 const catalogBatchSize = 400;
 const priceBatchSize = 20;
@@ -192,21 +193,37 @@ export async function planPriceSync(client: DbClient, queue: Queue<BackgroundJob
   const symbols = await client.query<{id:string;symbol:string}>(
     `SELECT id,provider_symbol AS symbol FROM market_symbols WHERE is_active=true ORDER BY id`,
   );
+  // Turkish mutual funds have no catalog (TEFAS itself blocks the kind of
+  // plain fetch() that builds market_symbols - see fund.provider.ts) - each
+  // book's fund instrument carries its own hand-typed TEFAS code instead, so
+  // these are queued per-instrument rather than per-symbol.
+  const fundInstruments = await client.query<{id:string;symbol:string}>(
+    `SELECT i.id,i.symbol FROM investment_instruments i
+     JOIN investment_asset_types t ON t.id=i.asset_type_id
+     WHERE i.deleted_at IS NULL AND i.market_symbol_id IS NULL AND i.symbol IS NOT NULL AND t.name ILIKE '%fon%'
+     ORDER BY i.id`,
+  );
+  const totalItems = symbols.rows.length + fundInstruments.rows.length;
   await client.query(
     `UPDATE market_data_sync_runs SET status='RUNNING',started_at=COALESCE(started_at,now()),
        total_items=$2,updated_at=now() WHERE id=$1 AND status IN ('QUEUED','RUNNING')`,
-    [runId,symbols.rows.length],
+    [runId,totalItems],
   );
-  if (symbols.rows.length === 0) {
+  if (totalItems === 0) {
     await client.query(
       `UPDATE market_data_sync_runs SET status='COMPLETED',completed_at=now(),updated_at=now() WHERE id=$1`,
       [runId],
     );
     return;
   }
-  const messages = chunks(symbols.rows,priceBatchSize).map((items,index) => ({
-    body: { type: "FETCH_MARKET_PRICE_BATCH", runId, targetDate, batchKey: String(index), items } as BackgroundJob,
-  }));
+  const messages = [
+    ...chunks(symbols.rows,priceBatchSize).map((items,index) => ({
+      body: { type: "FETCH_MARKET_PRICE_BATCH", runId, targetDate, batchKey: String(index), items } as BackgroundJob,
+    })),
+    ...chunks(fundInstruments.rows,priceBatchSize).map((items,index) => ({
+      body: { type: "FETCH_FUND_PRICE_BATCH", runId, targetDate, batchKey: `fund:${index}`, items } as BackgroundJob,
+    })),
+  ];
   for (const group of chunks(messages,100)) await queue.sendBatch(group);
 }
 
@@ -257,6 +274,74 @@ export async function processPriceBatch(
   );
   if (alreadyDone.rowCount) return;
   const counts = await insertPrices(client,job.items,job.targetDate,fetcher);
+  await client.query("BEGIN");
+  try {
+    const inserted = await client.query(
+      `INSERT INTO market_data_sync_batches(run_id,batch_key,processed_items,updated_items,missing_items,failed_items)
+       VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING RETURNING run_id`,
+      [job.runId,job.batchKey,job.items.length,counts.updated,counts.missing,counts.failed],
+    );
+    if (inserted.rowCount) {
+      await client.query(
+        `UPDATE market_data_sync_runs SET
+           processed_items=processed_items+$2,updated_items=updated_items+$3,
+           missing_items=missing_items+$4,failed_items=failed_items+$5,
+           status=CASE WHEN processed_items+$2>=total_items THEN 'COMPLETED' ELSE 'RUNNING' END,
+           completed_at=CASE WHEN processed_items+$2>=total_items THEN now() ELSE completed_at END,
+           updated_at=now() WHERE id=$1`,
+        [job.runId,job.items.length,counts.updated,counts.missing,counts.failed],
+      );
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  }
+}
+
+async function insertFundPrices(client: DbClient, items: readonly PriceJobItem[], fetcher: typeof fetch) {
+  const bySymbol = new Map(items.map((item) => [item.symbol.trim().toUpperCase(),item]));
+  const result = await fetchFintablesFundPrices(items.map((item) => item.symbol),fetcher);
+  if (result.points.length > 0) {
+    const values: unknown[] = [];
+    const rows: string[] = [];
+    for (const point of result.points) {
+      const item = bySymbol.get(point.symbol);
+      if (!item) continue;
+      const offset = rows.length * 3;
+      // Fixed at Istanbul noon so a same-day rerun updates this exact row
+      // instead of piling up duplicate prices for the day, and so it lines
+      // up with listBookInstrumentPrices' Europe/Istanbul date join.
+      values.push(item.id,point.price,`${point.priceDate}T12:00:00+03:00`);
+      rows.push(`($${offset + 1},$${offset + 2},$${offset + 3})`);
+    }
+    if (rows.length > 0) {
+      await client.query(
+        `INSERT INTO investment_prices(instrument_id,price,priced_at)
+         VALUES ${rows.join(",")}
+         ON CONFLICT(instrument_id,priced_at) DO UPDATE SET price=excluded.price`,
+        values,
+      );
+    }
+  }
+  return {
+    failed: result.failedSymbols.length,
+    missing: Math.max(0,items.length-result.points.length-result.failedSymbols.length),
+    updated: result.points.length,
+  };
+}
+
+export async function processFundPriceBatch(
+  client: DbClient,
+  job: {batchKey:string;items:PriceJobItem[];runId:string;targetDate:string},
+  fetcher: typeof fetch = fetch,
+) {
+  const alreadyDone = await client.query(
+    `SELECT 1 FROM market_data_sync_batches WHERE run_id=$1 AND batch_key=$2`,
+    [job.runId,job.batchKey],
+  );
+  if (alreadyDone.rowCount) return;
+  const counts = await insertFundPrices(client,job.items,fetcher);
   await client.query("BEGIN");
   try {
     const inserted = await client.query(

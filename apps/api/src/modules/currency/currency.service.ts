@@ -8,8 +8,11 @@ const runProjection = `id,kind,target_date::text AS "targetDate",status,total_it
 
 export async function listCurrencies(client: DbClient, bookId: string) {
   const result = await client.query(
+    // TRY is the book's base currency, so it's always selectable even when
+    // no book_currencies row was ever seeded for it - only foreign currencies
+    // need an explicit opt-in.
     `SELECT c.code,c.name_tr AS "nameTr",c.name_en AS "nameEn",
-       (bc.currency_code IS NOT NULL) AS "isEnabled"
+       (c.code='TRY' OR bc.currency_code IS NOT NULL) AS "isEnabled"
      FROM currencies c
      LEFT JOIN book_currencies bc ON bc.currency_code=c.code AND bc.book_id=$1
      WHERE c.is_active=true ORDER BY (c.code='TRY') DESC,c.name_tr`,

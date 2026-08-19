@@ -3,7 +3,7 @@ import type { BackgroundJob, Env } from "./config/bindings";
 import { withDatabase } from "./infrastructure/database";
 import { processDueRecurring } from "./modules/recurring-transactions/recurring.service";
 import {
-  createPriceSyncRun,ensureMarketData,planPriceSync,processPriceBatch,processSplitBatch,queueLinkedSplitBatches,syncMarketCatalog,
+  createPriceSyncRun,ensureMarketData,planPriceSync,processFundPriceBatch,processPriceBatch,processSplitBatch,queueLinkedSplitBatches,syncMarketCatalog,
 } from "./modules/market-data/market-data.service";
 import { syncCurrencyRates } from "./modules/currency/currency.service";
 
@@ -45,6 +45,7 @@ export default {
           else if(job.type === "SYNC_MARKET_CATALOG") await syncMarketCatalog(client);
           else if(job.type === "PLAN_MARKET_PRICES") await planPriceSync(client,env.JOBS,job.runId,job.targetDate);
           else if(job.type === "FETCH_MARKET_PRICE_BATCH") await processPriceBatch(client,job);
+          else if(job.type === "FETCH_FUND_PRICE_BATCH") await processFundPriceBatch(client,job);
           else if(job.type === "PLAN_MARKET_SPLITS") await queueLinkedSplitBatches(client,env.JOBS);
           else if(job.type === "FETCH_MARKET_SPLIT_BATCH") await processSplitBatch(client,job.items);
           else if(job.type === "SYNC_CURRENCY_RATES") await syncCurrencyRates(client,job.targetDate);
