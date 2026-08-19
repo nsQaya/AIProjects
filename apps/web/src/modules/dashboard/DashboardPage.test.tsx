@@ -444,6 +444,37 @@ describe("CashFlowChart", () => {
     expect(Number(balancePoints[2]!.getAttribute("cy"))).toBeGreaterThan(Number(balancePoints[1]!.getAttribute("cy")));
   });
 
+  it("never prints a negative-zero axis label on the income/expense side",()=>{
+    // Regression coverage: gridlines in the negative zone are computed as
+    // `-extentBelow * ...`, and the bar axis always passes extentBelow=0 (bars
+    // never go negative) - `-0 * n` is negative zero in JS, and Intl.NumberFormat
+    // renders that as the literal text "-0", while the balance axis correctly
+    // showed a real negative figure on the same row.
+    const items: readonly CashFlowView[] = [
+      { period:"2026-04",month:"2026-04",periodStart:"2026-04-01T00:00:00.000Z",income:"0",expense:"0",net:"0",balance:"0",
+        ui:{label:"Nis",income:0,expense:0,net:0,balance:0} },
+      { period:"2026-08",month:"2026-08",periodStart:"2026-08-01T00:00:00.000Z",income:"224300",expense:"224300",net:"0",balance:"-271700",
+        ui:{label:"Ağu",income:224300,expense:224300,net:0,balance:-271700} },
+    ];
+    const { container } = render(
+      <CashFlowChart
+        accounts={accounts}
+        accountIds={[ACCOUNT_ONE, ACCOUNT_TWO]}
+        items={items}
+        visibility={visibility}
+        onAccountsChange={vi.fn()}
+        onVisibilityChange={vi.fn()}
+      />,
+    );
+
+    const leftAxisLabels = [...container.querySelectorAll(".chart-axis-label:not(.balance-axis-label)")];
+    const rightAxisLabels = [...container.querySelectorAll(".chart-axis-label.balance-axis-label")];
+    expect(leftAxisLabels.length).toBeGreaterThan(0);
+    expect(leftAxisLabels.some((label) => label.textContent === "-0")).toBe(false);
+    // The right axis, on the same rows, does have real negative figures to show.
+    expect(rightAxisLabels.some((label) => /^-\d/.test(label.textContent ?? ""))).toBe(true);
+  });
+
   it("keeps its absolutely positioned tooltip stable while the pointer moves", () => {
     const { container } = render(
       <CashFlowChart

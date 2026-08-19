@@ -84,14 +84,21 @@ export function CashFlowChart({
     }
     return negativeZoneHeight > 0 ? zeroY + (-amount / balanceNegativeExtent) * negativeZoneHeight : zeroY;
   };
-  const valueAtY = (y: number, extentAbove: number, extentBelow: number) =>
-    y <= zeroY
-      ? positiveZoneHeight > 0
-        ? (extentAbove * (zeroY - y)) / positiveZoneHeight
-        : 0
-      : negativeZoneHeight > 0
-        ? (-extentBelow * (y - zeroY)) / negativeZoneHeight
-        : 0;
+  const valueAtY = (y: number, extentAbove: number, extentBelow: number) => {
+    const raw =
+      y <= zeroY
+        ? positiveZoneHeight > 0
+          ? (extentAbove * (zeroY - y)) / positiveZoneHeight
+          : 0
+        : negativeZoneHeight > 0
+          ? (-extentBelow * (y - zeroY)) / negativeZoneHeight
+          : 0;
+    // extentBelow is 0 for the bar axis (bars never go negative), so the negative
+    // branch above computes -0 * something = -0 there. Intl.NumberFormat renders
+    // that as the text "-0", which is exactly the left/right mismatch reported -
+    // normalize it back to a plain zero.
+    return raw || 0;
+  };
   const labelEvery = Math.max(1, Math.ceil(items.length / 10));
   const activeItem = activeIndex === null ? null : (items[activeIndex] ?? null);
 
