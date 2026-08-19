@@ -177,19 +177,26 @@ export async function loadReportAnalytics(
            JOIN transactions t ON t.id=e.transaction_id AND t.status IN ('POSTED','REVERSED')
            WHERE t.transaction_date < $2::timestamptz
          ), event_impacts AS (
-           SELECT s.scheduled_at,
+           SELECT t.transaction_date AS at,
+             CASE WHEN e.direction='DEBIT' THEN e.base_amount ELSE -e.base_amount END impact
+           FROM selected_accounts sa
+           JOIN transaction_entries e ON e.account_id=sa.id
+           JOIN transactions t ON t.id=e.transaction_id AND t.status IN ('POSTED','REVERSED')
+           WHERE t.transaction_date BETWEEN $2 AND $3
+           UNION ALL
+           SELECT s.scheduled_at AS at,
              CASE WHEN s.transaction_type IN ('INCOME','COLLECTION','SALE') THEN s.amount ELSE -s.amount END impact
            FROM scheduled_transactions s JOIN selected_accounts sa ON sa.id=s.account_id
            WHERE s.book_id=$1 AND s.status IN ('PENDING','OVERDUE') AND s.deleted_at IS NULL
              AND s.scheduled_at BETWEEN $2 AND $3
            UNION ALL
-           SELECT s.scheduled_at,s.amount impact
+           SELECT s.scheduled_at AS at,s.amount impact
            FROM scheduled_transactions s JOIN selected_accounts sa ON sa.id=s.target_account_id
            WHERE s.book_id=$1 AND s.transaction_type='TRANSFER'
              AND s.status IN ('PENDING','OVERDUE') AND s.deleted_at IS NULL
              AND s.scheduled_at BETWEEN $2 AND $3
          ), totals AS (
-           SELECT date_trunc($6,scheduled_at) bucket,
+           SELECT date_trunc($6,at) bucket,
                   COALESCE(SUM(impact) FILTER (WHERE impact>0),0) inflow,
                   COALESCE(-SUM(impact) FILTER (WHERE impact<0),0) outflow,
                   COALESCE(SUM(impact),0) net

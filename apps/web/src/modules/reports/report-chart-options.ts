@@ -174,9 +174,9 @@ export function liquidityOption(
 ): ReportChartOption {
   return {
     animationDuration: 350,
-    aria: { enabled: true, decal: { show: true }, description: "Planlı işlemlere göre tahmini nakit bakiyesi." },
+    aria: { enabled: true, decal: { show: true }, description: "Gerçekleşen ve planlı işlemlere göre tahmini nakit bakiyesi." },
     color: ["#287b60", "#d6a448", "#456fa9"],
-    legend: { bottom: 0, data: ["Beklenen giriş", "Beklenen çıkış", "Tahmini bakiye"] },
+    legend: { bottom: 0, data: ["Giriş", "Çıkış", "Tahmini bakiye"] },
     tooltip: seriesTooltip(),
     grid: { left: 18, right: 18, top: 20, bottom: 48, containLabel: true },
     xAxis: { type: "category", data: items.map((item) => item.period), axisLabel: { color: "#75827c", hideOverlap: true } },
@@ -186,8 +186,8 @@ export function liquidityOption(
       splitLine: { lineStyle: { color: "#e8ece9" } },
     },
     series: [
-      { name: "Beklenen giriş", type: "bar", stack: "flow", barMaxWidth: 24, data: items.map((item) => Number(item.inflow)) },
-      { name: "Beklenen çıkış", type: "bar", stack: "flow", barMaxWidth: 24, data: items.map((item) => -Number(item.outflow)) },
+      { name: "Giriş", type: "bar", stack: "flow", barMaxWidth: 24, data: items.map((item) => Number(item.inflow)) },
+      { name: "Çıkış", type: "bar", stack: "flow", barMaxWidth: 24, data: items.map((item) => -Number(item.outflow)) },
       { name: "Tahmini bakiye", type: "line", smooth: true, symbolSize: 7, lineStyle: { width: 3 }, data: items.map((item) => Number(item.projectedBalance)) },
     ],
   };

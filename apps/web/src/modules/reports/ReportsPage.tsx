@@ -234,12 +234,12 @@ export function ReportsPage({
         <>
           <div className="report-metrics">
             <article><span>Başlangıç bakiyesi</span><strong>{money(Number(analytics.liquidity.openingBalance))}</strong></article>
-            <article><span>Beklenen giriş</span><strong>{money(sum(analytics.liquidity.items.map((item) => item.inflow)))}</strong></article>
-            <article><span>Beklenen çıkış</span><strong>{money(sum(analytics.liquidity.items.map((item) => item.outflow)))}</strong></article>
+            <article><span>Giriş</span><strong>{money(sum(analytics.liquidity.items.map((item) => item.inflow)))}</strong></article>
+            <article><span>Çıkış</span><strong>{money(sum(analytics.liquidity.items.map((item) => item.outflow)))}</strong></article>
             <article><span>Tahmini dönem sonu</span><strong>{money(Number(analytics.liquidity.items.at(-1)?.projectedBalance ?? analytics.liquidity.openingBalance))}</strong></article>
           </div>
           <article className="panel report-main-panel">
-            <header className="panel-head"><div><h2>Likidite ve Nakit Tahmini</h2><p>Mevcut bakiye ile bekleyen planlı işlemlerin birleşik projeksiyonu</p></div></header>
+            <header className="panel-head"><div><h2>Likidite ve Nakit Tahmini</h2><p>Başlangıç bakiyesi, gerçekleşen işlemler ve bekleyen planlı işlemlerin birleşik projeksiyonu</p></div></header>
             <ReportChart busy={busy} height={390} label="Likidite ve nakit tahmini" option={liquidityOption(analytics.liquidity.items)} />
             <div className="report-table-wrap"><table className="report-table"><thead><tr><th>Tarih</th><th>Planlı işlem</th><th>Tür</th><th>Etki</th></tr></thead><tbody>
               {analytics.liquidity.events.map((event) => <tr key={event.id}><td>{reportDate(event.scheduledAt)}</td><td>{event.title}</td><td>{event.type}</td><td className={Number(event.impact) >= 0 ? "positive" : "negative"}>{money(Number(event.impact))}</td></tr>)}
