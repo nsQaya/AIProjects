@@ -120,8 +120,13 @@ export function CashFlowChart({
         >
           {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
             const y = CHART.top + plotHeight * (1 - ratio);
-            const incomeExpenseValue = valueAtY(y, positiveExtent, 0);
-            const balanceValue = valueAtY(y, positiveExtent, balanceNegativeExtent);
+            // Bars and the balance line share one geometric scale (see zeroY/
+            // positiveExtent/negativeExtent above), so a given row means the same
+            // amount for both - the left and right labels now always agree, mirrored
+            // purely for readability on a wide chart, not because they're different
+            // scales. (Bars themselves still never draw below zeroY: income/expense
+            // can't be negative. The axis simply reports what that row means.)
+            const axisValue = valueAtY(y, positiveExtent, balanceNegativeExtent);
             return (
               <g key={ratio}>
                 <line
@@ -137,7 +142,7 @@ export function CashFlowChart({
                   y={y + 3}
                   textAnchor="end"
                 >
-                  {shortMoney(incomeExpenseValue)}
+                  {shortMoney(axisValue)}
                 </text>
                 {visibility.balance ? (
                   <text
@@ -146,7 +151,7 @@ export function CashFlowChart({
                     y={y + 3}
                     textAnchor="start"
                   >
-                    {shortMoney(balanceValue)}
+                    {shortMoney(axisValue)}
                   </text>
                 ) : null}
               </g>

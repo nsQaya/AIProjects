@@ -444,12 +444,15 @@ describe("CashFlowChart", () => {
     expect(Number(balancePoints[2]!.getAttribute("cy"))).toBeGreaterThan(Number(balancePoints[1]!.getAttribute("cy")));
   });
 
-  it("never prints a negative-zero axis label on the income/expense side",()=>{
-    // Regression coverage: gridlines in the negative zone are computed as
-    // `-extentBelow * ...`, and the bar axis always passes extentBelow=0 (bars
-    // never go negative) - `-0 * n` is negative zero in JS, and Intl.NumberFormat
-    // renders that as the literal text "-0", while the balance axis correctly
-    // showed a real negative figure on the same row.
+  it("shows the same figure on the left and right axis for every row, including negative ones",()=>{
+    // Regression coverage, two rounds: the left and right labels used to come from
+    // two independent scales (bars vs. balance), so they legitimately disagreed on
+    // every row - reported as "the numbers on each side don't match". Passing
+    // extentBelow=0 for the bar axis was an interim fix that stopped the disagreement
+    // from showing as the literal text "-0", but the axes still disagreed (0 vs a
+    // real negative figure). Both series are drawn on one shared geometric scale
+    // (zeroY/positiveExtent/negativeExtent), so the axis labels should just report
+    // that one shared value on both sides instead of pretending there are two scales.
     const items: readonly CashFlowView[] = [
       { period:"2026-04",month:"2026-04",periodStart:"2026-04-01T00:00:00.000Z",income:"0",expense:"0",net:"0",balance:"0",
         ui:{label:"Nis",income:0,expense:0,net:0,balance:0} },
@@ -470,9 +473,14 @@ describe("CashFlowChart", () => {
     const leftAxisLabels = [...container.querySelectorAll(".chart-axis-label:not(.balance-axis-label)")];
     const rightAxisLabels = [...container.querySelectorAll(".chart-axis-label.balance-axis-label")];
     expect(leftAxisLabels.length).toBeGreaterThan(0);
+    expect(leftAxisLabels.length).toBe(rightAxisLabels.length);
+    leftAxisLabels.forEach((label, index) => {
+      expect(label.textContent).toBe(rightAxisLabels[index]!.textContent);
+    });
+    // Never the literal "-0" text (JS negative zero formatted by Intl.NumberFormat).
     expect(leftAxisLabels.some((label) => label.textContent === "-0")).toBe(false);
-    // The right axis, on the same rows, does have real negative figures to show.
-    expect(rightAxisLabels.some((label) => /^-\d/.test(label.textContent ?? ""))).toBe(true);
+    // And real negative figures do appear, now on both sides.
+    expect(leftAxisLabels.some((label) => /^-\d/.test(label.textContent ?? ""))).toBe(true);
   });
 
   it("keeps its absolutely positioned tooltip stable while the pointer moves", () => {
