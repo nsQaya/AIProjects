@@ -33,6 +33,28 @@ async function context(c: any) {
   };
 }
 
+// Feeds the dashboard's "Son işlemler" panel, which applies its own client-side
+// range switch (1 ay/3 ay/.../10 yıl) by filtering this one fixed batch rather
+// than re-querying per range. It must exclude future-dated transactions (e.g.
+// already-realized recurring items dated months ahead) - otherwise those
+// dominate the DESC/LIMIT window and starve out genuinely recent past
+// activity, which is what "recent" means here. LIMIT is generous (not just
+// enough for the 5-row preview) so wider ranges still have real data to filter
+// down to.
+export async function loadDashboardRecentTransactions(pool: DbClient, bookId: string) {
+  const result = await pool.query(
+    `SELECT t.id,t.transaction_type AS type,t.title,t.transaction_date AS "transactionDate",
+            t.currency_code AS "currencyCode",e.amount::text AS amount
+     FROM transactions t
+     LEFT JOIN LATERAL (SELECT amount FROM transaction_entries WHERE transaction_id=t.id LIMIT 1) e ON true
+     WHERE t.book_id=$1 AND t.deleted_at IS NULL AND t.status='POSTED' AND t.transaction_type<>'REVERSAL'
+       AND t.transaction_date<=now()
+     ORDER BY t.transaction_date DESC,t.transaction_no DESC LIMIT 100`,
+    [bookId],
+  );
+  return result.rows;
+}
+
 const incomeExpenseSql = `
   SELECT
     COALESCE(SUM(CASE WHEN a.account_type='SYSTEM_INCOME' AND e.direction='CREDIT' THEN e.base_amount
@@ -112,15 +134,7 @@ reportRoutes.get("/dashboard",async (c) => {
        GROUP BY a.id ORDER BY a.sort_order,a.name LIMIT 8`,
       [bookId],
     ),
-    pool.query(
-      `SELECT t.id,t.transaction_type AS type,t.title,t.transaction_date AS "transactionDate",
-              t.currency_code AS "currencyCode",e.amount::text AS amount
-       FROM transactions t
-       LEFT JOIN LATERAL (SELECT amount FROM transaction_entries WHERE transaction_id=t.id LIMIT 1) e ON true
-       WHERE t.book_id=$1 AND t.deleted_at IS NULL AND t.status='POSTED' AND t.transaction_type<>'REVERSAL'
-       ORDER BY t.transaction_date DESC,t.transaction_no DESC LIMIT 10`,
-      [bookId],
-    ),
+    loadDashboardRecentTransactions(pool,bookId),
     pool.query(
       `SELECT id,title,amount::text,currency_code AS "currencyCode",scheduled_at AS "scheduledAt",transaction_type AS type
        FROM scheduled_transactions
@@ -129,7 +143,7 @@ reportRoutes.get("/dashboard",async (c) => {
       [bookId],
     ),
   ]);
-  return c.json({month:summary.rows[0],importantAccounts:accounts.rows,recentTransactions:recent.rows,upcoming:upcoming.rows});
+  return c.json({month:summary.rows[0],importantAccounts:accounts.rows,recentTransactions:recent,upcoming:upcoming.rows});
 });
 
 reportRoutes.get("/cash-flow",async (c) => {

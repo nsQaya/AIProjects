@@ -992,7 +992,9 @@ export class FinanceService {
   }
 
   async currencyRateSyncStatus(date: string): Promise<CurrencyRateSyncRunDTO | null> {
-    const response = await this.#api.request(`/api/v1/currencies/rates/sync-status?${buildQuery({ date })}`, {
+    const response = await this.#api.request(`/api/v1/currencies/rates/sync-status?${buildQuery({
+      bookId: this.bookId(),date,
+    })}`, {
       schema: currencyRateSyncStatusSchema,
     });
     return response.run;

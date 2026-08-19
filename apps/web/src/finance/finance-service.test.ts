@@ -311,6 +311,29 @@ describe("FinanceService transaction boundaries", () => {
     expect(service.getSnapshot().reportAnalytics?.currencyCode).toBe("TRY");
   });
 
+  it("scopes every currency-rate request to the active book, including sync-status", async () => {
+    // Regression coverage: currencyRateSyncStatus once built its query string
+    // without bookId (unlike every sibling currency/market-data call below),
+    // so the backend's requireBookRole received an empty bookId, threw a raw
+    // Postgres UUID-syntax error, and the settings page surfaced a generic
+    // "Unexpected server error" - while also leaving currency rates stuck
+    // showing as unavailable, since the shared Promise.all never resolved.
+    const { api, service } = await initializedService();
+    api.handler = (path) => {
+      if (path.startsWith("/api/v1/currencies/rates/sync-status?")) return { run: null };
+      if (path.startsWith("/api/v1/currencies/rates/by-date?")) return { items: [] };
+      return defaultResponse(path, {});
+    };
+
+    await service.currencyRateSyncStatus("2026-08-19");
+    await service.currencyRatesAtDate("2026-08-19");
+
+    for (const call of api.calls) {
+      const url = new URL(call.path, "https://example.test");
+      expect(url.searchParams.get("bookId")).toBe(BOOK_ID);
+    }
+  });
+
   it("uses the cost-center CRUD endpoints with versioned payloads", async () => {
     const { api, service } = await initializedService();
     api.handler = (path, options) => {

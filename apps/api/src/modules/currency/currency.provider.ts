@@ -13,6 +13,8 @@ function datedUrl(date: string): string {
   return `https://www.tcmb.gov.tr/kurlar/${year}${month}/${day}${month}${year}.xml`;
 }
 
+const todayUrl = "https://www.tcmb.gov.tr/kurlar/today.xml";
+
 const requestHeaders = {
   Accept: "application/xml,text/xml;q=0.9,*/*;q=0.8",
   "User-Agent": "DefterX/1.0 currency-rates",
@@ -43,15 +45,31 @@ export function parseTcmbBulletin(xml: string): CurrencyRateBulletin | null {
   return { rateDate, points };
 }
 
-export async function fetchTcmbRates(
-  targetDate: string,
-  fetcher: typeof fetch = fetch,
-): Promise<CurrencyRateBulletin | null> {
-  const response = await fetcher(datedUrl(targetDate), { headers: requestHeaders });
-  if (response.status === 404) return null;
+async function fetchBulletin(url: string, fetcher: typeof fetch): Promise<CurrencyRateBulletin | null | "MISSING"> {
+  const response = await fetcher(url, { headers: requestHeaders });
+  if (response.status === 404) return "MISSING";
   if (response.status === 429 || response.status >= 500) {
     throw new Error(`TCMB temporarily unavailable (${response.status})`);
   }
   if (!response.ok) return null;
   return parseTcmbBulletin(await response.text());
+}
+
+export async function fetchTcmbRates(
+  targetDate: string,
+  fetcher: typeof fetch = fetch,
+): Promise<CurrencyRateBulletin | null> {
+  const dated = await fetchBulletin(datedUrl(targetDate), fetcher);
+  if (dated !== "MISSING") return dated;
+
+  // TCMB only adds the current business day to its dated archive after the
+  // fact - same-day rates are published solely via this "today.xml" alias
+  // (which keeps showing the last published day's rate until the next
+  // bulletin is out). Fall back to it, but only trust the result when its
+  // own embedded date actually matches what was requested, so a 404 for an
+  // unrelated (e.g. past/weekend) date never gets silently mislabeled with
+  // today's rate.
+  const live = await fetchBulletin(todayUrl, fetcher);
+  if (live === "MISSING" || live === null) return null;
+  return live.rateDate === targetDate ? live : null;
 }
