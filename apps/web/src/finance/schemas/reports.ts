@@ -153,6 +153,11 @@ export const reportAnalyticsSchema = z.object({
       impact: decimalStringSchema,
     })),
   }),
+  investmentValueSeries: z.array(z.object({
+    period: z.string(),
+    periodStart: isoDateTimeSchema,
+    value: decimalStringSchema,
+  })),
   netWorth: z.object({
     cashBalance: decimalStringSchema,
     investmentCost: decimalStringSchema,
@@ -174,6 +179,8 @@ export const reportAnalyticsSchema = z.object({
       latestPriceAt: isoDateTimeSchema.nullable(),
       currentValueTRY: decimalStringSchema.nullable(),
       unrealizedGainTRY: decimalStringSchema.nullable(),
+      costBasisTRY: decimalStringSchema.nullable(),
+      realizedGainTRY: decimalStringSchema.nullable(),
     })),
   }),
 });

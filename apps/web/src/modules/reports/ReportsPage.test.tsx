@@ -65,9 +65,10 @@ function analyticsFixture(): ReportAnalyticsResponse {
       items: [{ period: "2026-08", periodStart: "2026-08-01T00:00:00.000Z", inflow: "500", outflow: "200", net: "300", projectedBalance: "1900" }],
       events: [{ id: TRANSACTION_TWO_ID, title: "Beklenen ödeme", scheduledAt: "2026-08-20T10:00:00.000Z", type: "EXPENSE", impact: "-200" }],
     },
+    investmentValueSeries: [{ period: "2026-08", periodStart: "2026-08-01T00:00:00.000Z", value: "1200" }],
     netWorth: {
       cashBalance: "1600", investmentCost: "1000", investmentValue: "1200", realizedGain: "50", unrealizedGain: "200", totalAssets: "2800",
-      items: [{ instrumentId: INSTRUMENT_ID, name: "Fon", symbol: "FON", assetTypeName: "Yatırım Fonu", currencyCode: "TRY", quantity: "10", costBasis: "1000", currentValue: "1200", realizedGain: "50", unrealizedGain: "200", latestPriceAt: "2026-08-14T10:00:00.000Z", currentValueTRY: "1200", unrealizedGainTRY: "200" }],
+      items: [{ instrumentId: INSTRUMENT_ID, name: "Fon", symbol: "FON", assetTypeName: "Yatırım Fonu", currencyCode: "TRY", quantity: "10", costBasis: "1000", currentValue: "1200", realizedGain: "50", unrealizedGain: "200", latestPriceAt: "2026-08-14T10:00:00.000Z", currentValueTRY: "1200", unrealizedGainTRY: "200", costBasisTRY: "1000", realizedGainTRY: "50" }],
     },
   };
 }

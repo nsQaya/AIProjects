@@ -35,6 +35,11 @@ describe("market data provider", () => {
     expect(parseKapEtfs(etfHtml)[0]).toMatchObject({providerSymbol:"GLDTR.IS",instrumentType:"ETF"});
   });
 
+  it("takes the primary code from a dual-listed company's comma-separated stockCode", () => {
+    const equityHtml = String.raw`\"kapMemberTitle\":\"TÜRKİYE GARANTİ BANKASI A.Ş.\",\"relatedMemberTitle\":\"X\",\"stockCode\":\"GARAN, TGB\"`;
+    expect(parseKapEquities(equityHtml)[0]).toMatchObject({providerSymbol:"GARAN.IS",market:"BIST"});
+  });
+
   it("truncates names past market_symbols' 240-character limit instead of failing the batch", () => {
     const longName = `Warrant to purchase common stock ${"X".repeat(220)}`;
     expect(longName.length).toBeGreaterThan(240);

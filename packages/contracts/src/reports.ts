@@ -176,6 +176,15 @@ export interface InvestmentPerformanceItemDTO {
   /** currentValue/unrealizedGain converted to TRY at the latest known TCMB rate; equal to the plain fields when currencyCode is TRY, null when a foreign-currency instrument has no rate yet. */
   currentValueTRY: MoneyString | null;
   unrealizedGainTRY: MoneyString | null;
+  /** costBasis/realizedGain converted to TRY at the latest known TCMB rate; equal to the plain fields when currencyCode is TRY, null when a foreign-currency instrument has no rate yet. */
+  costBasisTRY: MoneyString | null;
+  realizedGainTRY: MoneyString | null;
+}
+
+export interface InvestmentValueSeriesItemDTO {
+  period: string;
+  periodStart: ISODateTimeString;
+  value: MoneyString;
 }
 
 export interface ReportAnalyticsResponse {
@@ -197,6 +206,7 @@ export interface ReportAnalyticsResponse {
     items: LiquidityForecastItemDTO[];
     events: LiquidityForecastEventDTO[];
   };
+  investmentValueSeries: InvestmentValueSeriesItemDTO[];
   netWorth: {
     cashBalance: MoneyString;
     investmentCost: MoneyString;

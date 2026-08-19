@@ -8,7 +8,7 @@ import type {
 import { ReportChart } from "../../components/charts";
 import type { AccountView } from "../../finance";
 import type { ReportRange } from "../../finance/finance-state";
-import { money } from "../../lib/format";
+import { money, moneyInCurrency, toNumber } from "../../lib/format";
 import { ReportFilters } from "./ReportFilters";
 import {
   accountBalanceOption,
@@ -256,13 +256,57 @@ export function ReportsPage({
             <article><span>Yatırım maliyeti</span><strong>{money(Number(analytics.netWorth.investmentCost))}</strong></article>
             <article><span>Gerçekleşen getiri</span><strong>{money(Number(analytics.netWorth.realizedGain))}</strong></article>
             <article><span>Gerçekleşmemiş getiri</span><strong>{money(Number(analytics.netWorth.unrealizedGain))}</strong></article>
+            <article style={{padding: "12px 14px"}}><span>Toplam</span><strong style={{fontSize: "15px"}}>{money(Number(analytics.netWorth.investmentCost) + Number(analytics.netWorth.unrealizedGain))}</strong></article>
           </div>
           <div className="report-net-worth-grid">
             <article className="panel"><header className="panel-head"><div><h2>Toplam Varlık</h2><p>Seçili hesaplar ve son bilinen yatırım fiyatları</p></div></header><ReportChart busy={busy} height={330} label="Toplam varlık dağılımı" option={netWorthOption(analytics.netWorth)} /></article>
             <article className="panel report-main-panel"><header className="panel-head"><div><h2>Yatırım Performansı</h2><p>Bitiş tarihindeki pozisyon ve seçili dönemde gerçekleşen getiri</p></div></header>
-              <div className="report-table-wrap"><table className="report-table"><thead><tr><th>Varlık</th><th>Maliyet</th><th>Güncel değer</th><th>Gerçekleşen</th><th>Gerçekleşmemiş</th></tr></thead><tbody>
-                {analytics.netWorth.items.map((item) => <tr key={item.instrumentId}><td><b>{item.name}</b><small>{item.symbol ?? item.assetTypeName}</small></td><td>{money(Number(item.costBasis))}</td><td>{item.currentValue === null ? "Fiyat yok" : money(Number(item.currentValue))}</td><td>{money(Number(item.realizedGain))}</td><td>{item.unrealizedGain === null ? "—" : money(Number(item.unrealizedGain))}</td></tr>)}
-                {analytics.netWorth.items.length === 0 ? <tr><td colSpan={5}>Seçilen kapsamda yatırım kaydı yok.</td></tr> : null}
+              <div className="report-table-wrap"><table className="report-table"><thead><tr><th>Varlık</th><th>Döviz</th><th>Maliyet</th><th>Güncel değer</th><th>Gerçekleşen</th><th>Gerçekleşmemiş</th><th>Toplam</th></tr></thead><tbody>
+                {analytics.netWorth.items.map((item) => {
+                  const foreign = item.currencyCode !== "TRY";
+                  const unrealizedGainValue = item.unrealizedGain === null ? 0 : toNumber(item.unrealizedGain);
+                  const totalValue = toNumber(item.costBasis) + unrealizedGainValue;
+                  const totalValueTRY = (item.costBasisTRY === null || (item.unrealizedGain !== null && item.unrealizedGainTRY === null))
+                    ? null
+                    : toNumber(item.costBasisTRY ?? "0") + toNumber(item.unrealizedGainTRY ?? "0");
+                  return (
+                    <tr key={item.instrumentId}>
+                      <td><b>{item.name}</b><small>{item.symbol ?? item.assetTypeName}</small></td>
+                      <td>{item.currencyCode}</td>
+                      <td>
+                        {moneyInCurrency(item.costBasis, item.currencyCode)}
+                        {foreign ? <small>{item.costBasisTRY !== null ? `≈ ${money(item.costBasisTRY)}` : "TL karşılığı için kur bekleniyor"}</small> : null}
+                      </td>
+                      <td>
+                        {item.currentValue === null ? "Fiyat yok" : moneyInCurrency(item.currentValue, item.currencyCode)}
+                        {foreign && item.currentValue !== null ? <small>{item.currentValueTRY !== null ? `≈ ${money(item.currentValueTRY)}` : "TL karşılığı için kur bekleniyor"}</small> : null}
+                      </td>
+                      <td>
+                        {moneyInCurrency(item.realizedGain, item.currencyCode)}
+                        {foreign ? <small>{item.realizedGainTRY !== null ? `≈ ${money(item.realizedGainTRY)}` : "TL karşılığı için kur bekleniyor"}</small> : null}
+                      </td>
+                      <td>
+                        {item.unrealizedGain === null ? "—" : moneyInCurrency(item.unrealizedGain, item.currencyCode)}
+                        {foreign && item.unrealizedGain !== null ? <small>{item.unrealizedGainTRY !== null ? `≈ ${money(item.unrealizedGainTRY)}` : "TL karşılığı için kur bekleniyor"}</small> : null}
+                      </td>
+                      <td>
+                        {moneyInCurrency(totalValue, item.currencyCode)}
+                        {foreign ? <small>{totalValueTRY !== null ? `≈ ${money(totalValueTRY)}` : "TL karşılığı için kur bekleniyor"}</small> : null}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {analytics.netWorth.items.length === 0 ? <tr><td colSpan={7}>Seçilen kapsamda yatırım kaydı yok.</td></tr> : null}
+                {analytics.netWorth.items.length > 0 ? (
+                  <tr style={{fontWeight: "bold", backgroundColor: "var(--background-secondary)"}}>
+                    <td colSpan={2}>TOPLAM</td>
+                    <td>{money(Number(analytics.netWorth.investmentCost))}</td>
+                    <td>{money(Number(analytics.netWorth.investmentValue))}</td>
+                    <td>{money(Number(analytics.netWorth.realizedGain))}</td>
+                    <td>{money(Number(analytics.netWorth.unrealizedGain))}</td>
+                    <td>{money(Number(analytics.netWorth.investmentCost) + Number(analytics.netWorth.unrealizedGain))}</td>
+                  </tr>
+                ) : null}
               </tbody></table></div>
             </article>
           </div>

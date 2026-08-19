@@ -18,6 +18,7 @@ describe("report analytics", () => {
       [{ period: "2026-08", periodStart: "2026-08-01T00:00:00.000Z", inflow: "30", outflow: "10", net: "20", projectedBalance: "180", openingBalance: "160" }],
       [],
       [{ instrumentId: INSTRUMENT_ID, name: "Fon", symbol: "FON", assetTypeName: "Fon", currencyCode: "TRY", quantity: "1", costBasis: "100", currentValue: "120", realizedGain: "5", unrealizedGain: "20", latestPriceAt: "2026-08-14T00:00:00.000Z", investmentCost: "100", investmentValue: "120", totalRealizedGain: "5", totalUnrealizedGain: "20" }],
+      [{ period: "2026-08", periodStart: "2026-08-01T00:00:00.000Z", value: "120" }],
       [{ cashBalance: "160" }],
     ];
     let call = 0;
@@ -60,6 +61,6 @@ describe("report analytics", () => {
       [ACCOUNT_ID],
       false,
     ]);
-    expect(calls.map((values) => values.length)).toEqual([1, 8, 8, 5, 5, 8, 5, 5, 5]);
+    expect(calls.map((values) => values.length)).toEqual([1, 8, 8, 5, 5, 8, 5, 8, 5, 5]);
   });
 });

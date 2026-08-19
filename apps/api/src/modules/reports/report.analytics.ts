@@ -60,7 +60,7 @@ export async function loadReportAnalytics(
   const scopeValues = [bookId, from, to, accountIds, includeAllAccounts];
   const seriesValues = [...scopeValues, granularity, interval, format];
 
-  const [book, trend, accountBalances, breakdown, transactions, liquidity, events, investments, cash] =
+  const [book, trend, accountBalances, breakdown, transactions, liquidity, events, investments, investmentValues, cash] =
     await Promise.all([
       pool.query<{ currencyCode: string }>(
         `SELECT base_currency AS "currencyCode" FROM books WHERE id=$1 AND deleted_at IS NULL`,
@@ -230,6 +230,46 @@ export async function loadReportAnalytics(
         scopeValues,
       ),
       pool.query(
+        `WITH selected_accounts AS (${accountScope}), periods AS (
+           SELECT generate_series(date_trunc($6,$2::timestamptz),date_trunc($6,$3::timestamptz),$7::interval) bucket
+         ), positions_at_period AS (
+           SELECT p.bucket,
+             COALESCE(SUM(
+               (l.quantity - COALESCE(SUM(s.quantity) FILTER (WHERE s.sold_at <= p.bucket), 0)) *
+               COALESCE(latest_price.price, 0) *
+               COALESCE(fx.try_rate, 1)
+             ), 0) value
+           FROM periods p
+           CROSS JOIN investment_lots l
+           JOIN investment_instruments i ON i.id=l.instrument_id
+           LEFT JOIN selected_accounts sa ON sa.id=l.account_id
+           LEFT JOIN investment_sales s ON s.book_id=$1 AND s.instrument_id=l.instrument_id AND s.deleted_at IS NULL
+           LEFT JOIN LATERAL (
+             SELECT candidate.price FROM (
+               SELECT ip.price,ip.priced_at,0 priority FROM investment_prices ip
+               WHERE ip.instrument_id=i.id AND ip.priced_at <= p.bucket
+               UNION ALL
+               SELECT mp.close AS price,(mp.price_date::timestamp AT TIME ZONE 'Europe/Istanbul'),1 priority
+               FROM market_daily_prices mp WHERE mp.market_symbol_id=i.market_symbol_id
+                 AND mp.price_date<=($3::timestamptz AT TIME ZONE 'Europe/Istanbul')::date
+             ) candidate ORDER BY candidate.priced_at DESC,candidate.priority LIMIT 1
+           ) latest_price ON true
+           LEFT JOIN LATERAL (
+             SELECT try_rate FROM currency_daily_rates
+             WHERE currency_code=i.currency_code ORDER BY rate_date DESC LIMIT 1
+           ) fx ON i.currency_code<>'TRY'
+           WHERE l.book_id=$1 AND l.deleted_at IS NULL
+             AND ($5::boolean OR sa.id IS NOT NULL)
+             AND l.purchased_at <= p.bucket
+           GROUP BY p.bucket
+         )
+         SELECT to_char(p.bucket,$8) period,p.bucket AS "periodStart",COALESCE(pap.value,0)::text value
+         FROM periods p
+         LEFT JOIN positions_at_period pap ON pap.bucket=p.bucket
+         ORDER BY p.bucket`,
+        seriesValues,
+      ),
+      pool.query(
         `WITH selected_accounts AS (${accountScope}), scoped_purchases AS (
            SELECT l.instrument_id,SUM(l.quantity) quantity,SUM(l.quantity*l.unit_price) cost_basis
            FROM investment_lots l
@@ -286,6 +326,8 @@ export async function loadReportAnalytics(
                 priced_at AS "latestPriceAt",
                 CASE WHEN price IS NULL OR try_rate IS NULL THEN NULL ELSE (quantity*price*try_rate)::text END AS "currentValueTRY",
                 CASE WHEN price IS NULL OR try_rate IS NULL THEN NULL ELSE (quantity*price*try_rate-cost_basis*try_rate)::text END AS "unrealizedGainTRY",
+                CASE WHEN try_rate IS NULL THEN NULL ELSE (cost_basis*try_rate)::text END AS "costBasisTRY",
+                CASE WHEN try_rate IS NULL THEN NULL ELSE (realized_gain*try_rate)::text END AS "realizedGainTRY",
                 COALESCE(SUM(cost_basis*try_rate) OVER (),0)::text AS "investmentCost",
                 COALESCE(SUM(CASE WHEN try_rate IS NULL THEN 0 ELSE COALESCE(quantity*price,cost_basis)*try_rate END) OVER (),0)::text AS "investmentValue",
                 COALESCE(SUM(realized_gain) OVER (),0)::text AS "totalRealizedGain",
@@ -349,6 +391,7 @@ export async function loadReportAnalytics(
       items: liquidityRows.map(({ openingBalance: _openingBalance, ...row }) => row) as unknown as ReportAnalyticsResponse["liquidity"]["items"],
       events: events.rows as ReportAnalyticsResponse["liquidity"]["events"],
     },
+    investmentValueSeries: investmentValues.rows as ReportAnalyticsResponse["investmentValueSeries"],
     netWorth: {
       cashBalance,
       investmentCost: investmentTotals.investmentCost ?? "0",

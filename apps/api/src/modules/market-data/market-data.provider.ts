@@ -101,7 +101,12 @@ export function parseKapEquities(html: string): MarketCatalogItem[] {
   const pattern = /"kapMemberTitle":"([^"]+)".{0,700}?"stockCode":"([^"]+)"/gs;
   const items = new Map<string, MarketCatalogItem>();
   for (const match of source.matchAll(pattern)) {
-    const code = match[2]?.trim().split(/\s+/)[0]?.toUpperCase();
+    // KAP lists dual/multi-listed companies (e.g. banks with a secondary
+    // code) as a comma-separated stockCode like "GARAN, TGB" - splitting on
+    // whitespace alone left a trailing comma on the primary code ("GARAN,"),
+    // which failed the format check below and silently dropped the whole
+    // company from the catalog.
+    const code = match[2]?.trim().split(/[,\s]+/)[0]?.toUpperCase();
     const name = match[1]?.trim();
     if (!code || !name || !/^[A-Z0-9]{2,8}$/.test(code)) continue;
     const providerSymbol = `${code}.IS`;
