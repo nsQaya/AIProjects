@@ -13,7 +13,14 @@ function datedUrl(date: string): string {
   return `https://www.tcmb.gov.tr/kurlar/${year}${month}/${day}${month}${year}.xml`;
 }
 
+function shiftDate(dateIso: string, deltaDays: number): string {
+  const date = new Date(`${dateIso}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + deltaDays);
+  return date.toISOString().slice(0, 10);
+}
+
 const todayUrl = "https://www.tcmb.gov.tr/kurlar/today.xml";
+const maxCarryDays = 7;
 
 const requestHeaders = {
   Accept: "application/xml,text/xml;q=0.9,*/*;q=0.8",
@@ -58,18 +65,28 @@ async function fetchBulletin(url: string, fetcher: typeof fetch): Promise<Curren
 export async function fetchTcmbRates(
   targetDate: string,
   fetcher: typeof fetch = fetch,
+  now: Date = new Date(),
 ): Promise<CurrencyRateBulletin | null> {
-  const dated = await fetchBulletin(datedUrl(targetDate), fetcher);
-  if (dated !== "MISSING") return dated;
+  if (targetDate === now.toISOString().slice(0, 10)) {
+    // TCMB only adds the current business day to its dated archive after
+    // the fact - same-day rates are published solely via this "today.xml"
+    // alias. An explicit request for today accepts whatever it currently
+    // shows outright (even the still-yesterday rate before today's own
+    // bulletin is out), since that is the best available TRY figure for
+    // "right now" either way.
+    const live = await fetchBulletin(todayUrl, fetcher);
+    if (live !== "MISSING") return live;
+  }
 
-  // TCMB only adds the current business day to its dated archive after the
-  // fact - same-day rates are published solely via this "today.xml" alias
-  // (which keeps showing the last published day's rate until the next
-  // bulletin is out). Fall back to it, but only trust the result when its
-  // own embedded date actually matches what was requested, so a 404 for an
-  // unrelated (e.g. past/weekend) date never gets silently mislabeled with
-  // today's rate.
-  const live = await fetchBulletin(todayUrl, fetcher);
-  if (live === "MISSING" || live === null) return null;
-  return live.rateDate === targetDate ? live : null;
+  // The exact requested date's archive, then the closest prior business
+  // day carried backward - a Friday close is treated as still current
+  // through the weekend, and the same applies to any holiday in between.
+  // Capped at maxCarryDays: some holiday blocks run 9+ days, and this is
+  // left to run out for the tail of those rather than reaching arbitrarily
+  // far into the past for a stand-in number.
+  for (let offset = 0; offset <= maxCarryDays; offset++) {
+    const result = await fetchBulletin(datedUrl(shiftDate(targetDate, -offset)), fetcher);
+    if (result !== "MISSING") return result;
+  }
+  return null;
 }
