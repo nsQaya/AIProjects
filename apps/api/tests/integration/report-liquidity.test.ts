@@ -5,8 +5,9 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 
 import { loadReportAnalytics } from "../../src/modules/reports/report.analytics";
+import { loadIncomeExpenseReport } from "../../src/modules/reports/report.routes";
 import { createScheduled } from "../../src/modules/scheduled-transactions/scheduled.service";
-import { createTransaction } from "../../src/modules/transactions/transaction.service";
+import { createTransaction,reverseTransaction } from "../../src/modules/transactions/transaction.service";
 
 // Regression coverage for a bug where the "Likidite tahmini" (liquidity forecast)
 // report only summed *scheduled* (not-yet-posted) transactions across the whole
@@ -59,9 +60,9 @@ suite("PostgreSQL liquidity forecast integration",()=>{
       [bookId,userId],
     );
     const accounts = await admin.query<{id:string}>(
-      `INSERT INTO accounts(book_id,name,account_type,normal_balance,currency_code,is_system)
-       VALUES($1,'Cash','CASH','DEBIT','TRY',false),
-             ($1,'Expense','SYSTEM_EXPENSE','DEBIT','TRY',true)
+      `INSERT INTO accounts(book_id,name,account_type,normal_balance,currency_code,is_system,allow_negative_balance)
+       VALUES($1,'Cash','CASH','DEBIT','TRY',false,true),
+             ($1,'Expense','SYSTEM_EXPENSE','DEBIT','TRY',true,true)
        RETURNING id`,
       [bookId],
     );
@@ -128,5 +129,65 @@ suite("PostgreSQL liquidity forecast integration",()=>{
     const endAfter = windowAfter.liquidity.items.at(-1)?.projectedBalance;
     expect(endBefore).toBe(endAfter);
     expect(Number(endBefore)).toBe(-1500);
+  });
+
+  it("does not let a reversed transaction's later-dated reversal show up as phantom movement in either bucket",async()=>{
+    // Mirrors what happened in production: a user posts an entry dated in the past,
+    // then corrects it (reverses it) much later. The reversal transaction gets its
+    // *own* transaction_date (whenever the correction was made), not the original's
+    // date - so a naive `status IN ('POSTED','REVERSED')` per-bucket sum shows the
+    // original's effect on its own date and the offsetting reversal's effect on a
+    // *different* date, as two large non-cancelling phantom swings, even though the
+    // net lifetime effect is genuinely zero. A dedicated account keeps this fully
+    // isolated from the other test in this file.
+    const account = await pool.query<{id:string}>(
+      `INSERT INTO accounts(book_id,name,account_type,normal_balance,currency_code,is_system,allow_negative_balance)
+       VALUES($1,'Correction Cash','CASH','DEBIT','TRY',false,true) RETURNING id`,
+      [bookId],
+    );
+    const correctionCashId = account.rows[0]!.id;
+
+    const now = new Date();
+    const originalDate = new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth()-6,15,9,0,0));
+    const created = await createTransaction(pool,userId,{
+      bookId,type:"EXPENSE",title:"Mis-dated entry",amount:"777",currencyCode:"TRY",
+      accountId:correctionCashId,categoryId:expenseCategoryId,
+      transactionDate:originalDate.toISOString(),clientOperationId:crypto.randomUUID(),
+    });
+    // The reversal's own transaction_date is set by reverseTransaction to "now",
+    // which is deliberately several months away from originalDate above.
+    await reverseTransaction(pool,userId,bookId,created.id,crypto.randomUUID(),"dated correction");
+
+    const from = new Date(Date.UTC(originalDate.getUTCFullYear(),originalDate.getUTCMonth()-1,1)).toISOString();
+    const to = new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth()+2,0,23,59,59,999)).toISOString();
+    const report = await loadReportAnalytics(pool,{
+      bookId,from,to,accountIds:[correctionCashId],includeAllAccounts:false,granularity:"month",
+    });
+
+    const label = (date: Date) => `${date.getUTCFullYear()}-${String(date.getUTCMonth()+1).padStart(2,"0")}`;
+    const originalBucket = report.liquidity.items.find((item) => item.period===label(originalDate));
+    const reversalBucket = report.liquidity.items.find((item) => item.period===label(now));
+
+    expect(originalBucket?.net).toBe("0");
+    expect(reversalBucket?.net).toBe("0");
+    expect(report.liquidity.openingBalance).toBe("0");
+    expect(report.liquidity.items.at(-1)?.projectedBalance).toBe("0");
+
+    // The trend tab (Gelir · Gider · Net) sums the same real-transaction data
+    // per bucket and had the identical latent bug.
+    const trendOriginal = report.trend.find((item) => item.period===label(originalDate));
+    const trendReversal = report.trend.find((item) => item.period===label(now));
+    expect(trendOriginal?.net).toBe("0");
+    expect(trendReversal?.net).toBe("0");
+
+    // report.routes.ts's income/expense breakdown (dashboard "Aylık net" and the
+    // category/cost-center report) shares the same query shape - check it directly
+    // for the month the mis-dated entry originally landed in.
+    const monthStart = new Date(Date.UTC(originalDate.getUTCFullYear(),originalDate.getUTCMonth(),1)).toISOString();
+    const monthEnd = new Date(Date.UTC(originalDate.getUTCFullYear(),originalDate.getUTCMonth()+1,0,23,59,59,999)).toISOString();
+    const monthly = await loadIncomeExpenseReport(pool,bookId,monthStart,monthEnd,[correctionCashId],false);
+    // The category only ever had the now-excluded reversed entry in this month, so
+    // it must not appear at all (not appear with a phantom non-zero amount).
+    expect(monthly.items.some((item) => item.name==="Market")).toBe(false);
   });
 });

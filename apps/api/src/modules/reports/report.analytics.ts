@@ -78,7 +78,7 @@ export async function loadReportAnalytics(
            FROM transaction_entries e
            JOIN accounts a ON a.id=e.account_id
            JOIN transactions t ON t.id=e.transaction_id
-           WHERE t.book_id=$1 AND t.status IN ('POSTED','REVERSED')
+           WHERE t.book_id=$1 AND t.status='POSTED' AND t.transaction_type<>'REVERSAL'
              AND t.transaction_date BETWEEN $2 AND $3
              AND EXISTS (
                SELECT 1 FROM transaction_entries scoped_e
@@ -96,7 +96,7 @@ export async function loadReportAnalytics(
          LEFT JOIN LATERAL (
            SELECT COALESCE(SUM(CASE WHEN e.direction='DEBIT' THEN e.base_amount ELSE -e.base_amount END),0) balance
            FROM transaction_entries e
-           JOIN transactions bt ON bt.id=e.transaction_id AND bt.status IN ('POSTED','REVERSED')
+           JOIN transactions bt ON bt.id=e.transaction_id AND bt.status='POSTED' AND bt.transaction_type<>'REVERSAL'
            JOIN selected_accounts sa ON sa.id=e.account_id
            WHERE bt.transaction_date < p.bucket+$7::interval AND bt.transaction_date <= $3::timestamptz
          ) b ON true
@@ -113,7 +113,7 @@ export async function loadReportAnalytics(
          LEFT JOIN LATERAL (
            SELECT COALESCE(SUM(CASE WHEN e.direction='DEBIT' THEN e.base_amount ELSE -e.base_amount END),0) balance
            FROM transaction_entries e
-           JOIN transactions t ON t.id=e.transaction_id AND t.status IN ('POSTED','REVERSED')
+           JOIN transactions t ON t.id=e.transaction_id AND t.status='POSTED' AND t.transaction_type<>'REVERSAL'
            WHERE e.account_id=sa.id AND t.transaction_date < p.bucket+$7::interval
              AND t.transaction_date <= $3::timestamptz
          ) b ON true
@@ -132,7 +132,7 @@ export async function loadReportAnalytics(
          JOIN transaction_entries e ON e.account_id=c.system_account_id
          JOIN transactions t ON t.id=e.transaction_id
          LEFT JOIN cost_centers cc ON cc.id=t.cost_center_id
-         WHERE c.book_id=$1 AND t.status IN ('POSTED','REVERSED')
+         WHERE c.book_id=$1 AND t.status='POSTED' AND t.transaction_type<>'REVERSAL'
            AND t.transaction_date BETWEEN $2 AND $3
            AND EXISTS (
              SELECT 1 FROM transaction_entries scoped_e
@@ -174,14 +174,14 @@ export async function loadReportAnalytics(
            SELECT COALESCE(SUM(CASE WHEN e.direction='DEBIT' THEN e.base_amount ELSE -e.base_amount END),0) balance
            FROM selected_accounts sa
            JOIN transaction_entries e ON e.account_id=sa.id
-           JOIN transactions t ON t.id=e.transaction_id AND t.status IN ('POSTED','REVERSED')
+           JOIN transactions t ON t.id=e.transaction_id AND t.status='POSTED' AND t.transaction_type<>'REVERSAL'
            WHERE t.transaction_date < $2::timestamptz
          ), event_impacts AS (
            SELECT t.transaction_date AS at,
              CASE WHEN e.direction='DEBIT' THEN e.base_amount ELSE -e.base_amount END impact
            FROM selected_accounts sa
            JOIN transaction_entries e ON e.account_id=sa.id
-           JOIN transactions t ON t.id=e.transaction_id AND t.status IN ('POSTED','REVERSED')
+           JOIN transactions t ON t.id=e.transaction_id AND t.status='POSTED' AND t.transaction_type<>'REVERSAL'
            WHERE t.transaction_date BETWEEN $2 AND $3
            UNION ALL
            SELECT s.scheduled_at AS at,
@@ -298,7 +298,7 @@ export async function loadReportAnalytics(
          SELECT COALESCE(SUM(CASE WHEN e.direction='DEBIT' THEN e.base_amount ELSE -e.base_amount END),0)::text AS "cashBalance"
          FROM selected_accounts sa
          JOIN transaction_entries e ON e.account_id=sa.id
-         JOIN transactions t ON t.id=e.transaction_id AND t.status IN ('POSTED','REVERSED')
+         JOIN transactions t ON t.id=e.transaction_id AND t.status='POSTED' AND t.transaction_type<>'REVERSAL'
          WHERE t.transaction_date <= $3::timestamptz
            AND $2::timestamptz <= $3::timestamptz`,
         scopeValues,

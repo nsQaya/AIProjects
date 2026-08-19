@@ -205,12 +205,11 @@ suite("PostgreSQL cost-center integration",()=>{
     const net = await loadIncomeExpenseReport(
       pool,bookId,"2026-01-01T00:00:00.000Z","2026-12-31T23:59:59.999Z",
     );
-    expect(net.costCenters).toContainEqual(expect.objectContaining({
-      id:center.id,
-      name:"Anne",
-      isActive:false,
-      amount:"0.000000",
-    }));
+    // The reversed transaction and its reversal (dated when the reversal was made,
+    // not the original's date) are both excluded from report totals, so a center
+    // with no other activity in the window drops out entirely rather than lingering
+    // as an explicit zero row - the report only shows real, current-net activity.
+    expect(net.costCenters).not.toContainEqual(expect.objectContaining({id:center.id}));
   });
 
   it("executes the complete analytics suite against PostgreSQL",async()=>{
