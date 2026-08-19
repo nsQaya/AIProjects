@@ -399,6 +399,51 @@ describe("CashFlowChart", () => {
     expect(container.querySelector(".balance-line")).toBeInTheDocument();
   });
 
+  it("plots a zero balance on the same baseline as a zero-height bar, even while other periods are deep negative",()=>{
+    // Regression coverage: income/expense bars and the balance line used to sit on
+    // fully independent axes, so a period with income=0, expense=0, balance=0 drew
+    // its balance point far away from where "zero" actually sits for the bars -
+    // near the top of the chart whenever every other period's balance was negative.
+    const items: readonly CashFlowView[] = [
+      { period:"2026-04",month:"2026-04",periodStart:"2026-04-01T00:00:00.000Z",income:"0",expense:"0",net:"0",balance:"0",
+        ui:{label:"Nis",income:0,expense:0,net:0,balance:0} },
+      { period:"2026-07",month:"2026-07",periodStart:"2026-07-01T00:00:00.000Z",income:"0",expense:"224264.11",net:"-224264.11",balance:"-224264.11",
+        ui:{label:"Tem",income:0,expense:224264.11,net:-224264.11,balance:-224264.11} },
+      { period:"2026-08",month:"2026-08",periodStart:"2026-08-01T00:00:00.000Z",income:"121000",expense:"170901.78",net:"-49901.78",balance:"-271665.89",
+        ui:{label:"Ağu",income:121000,expense:170901.78,net:-49901.78,balance:-271665.89} },
+    ];
+    const { container } = render(
+      <CashFlowChart
+        accounts={accounts}
+        accountIds={[ACCOUNT_ONE, ACCOUNT_TWO]}
+        items={items}
+        visibility={visibility}
+        onAccountsChange={vi.fn()}
+        onVisibilityChange={vi.fn()}
+      />,
+    );
+
+    const zeroLine = container.querySelector("[data-cashflow-zero-line]");
+    expect(zeroLine).toBeInTheDocument();
+    const zeroY = zeroLine!.getAttribute("y1");
+
+    const balancePoints = container.querySelectorAll(".balance-point");
+    expect(balancePoints).toHaveLength(3);
+    // April: no income, no expense, balance 0 - must sit exactly on the shared
+    // zero baseline, not wherever the (all-negative) balance range happens to peak.
+    expect(balancePoints[0]!.getAttribute("cy")).toBe(zeroY);
+
+    // A bar's own baseline (its bottom edge) must match that same zero line too.
+    const augustExpenseBar = container.querySelector('[data-cashflow-bar="expense"][data-cashflow-bar-index="2"]')!;
+    const barBottom = Number(augustExpenseBar.getAttribute("y")) + Number(augustExpenseBar.getAttribute("height"));
+    expect(barBottom).toBeCloseTo(Number(zeroY), 5);
+
+    // The most negative period must be strictly below the zero line, and the more
+    // negative of the two non-zero periods must sit further down than the other.
+    expect(Number(balancePoints[1]!.getAttribute("cy"))).toBeGreaterThan(Number(zeroY));
+    expect(Number(balancePoints[2]!.getAttribute("cy"))).toBeGreaterThan(Number(balancePoints[1]!.getAttribute("cy")));
+  });
+
   it("keeps its absolutely positioned tooltip stable while the pointer moves", () => {
     const { container } = render(
       <CashFlowChart

@@ -81,7 +81,8 @@ select, input { min-height: 42px; padding: 0 12px; color: var(--ink); border: 1p
 .cashflow-visual { width: 100%; position: relative; overflow: hidden; }
 .cashflow-svg { width: 100%; height: auto; min-height: 255px; display: block; overflow: visible; }
 .chart-grid-line { stroke: #e8ece9; stroke-width: 1; vector-effect: non-scaling-stroke; }
-.chart-axis-label, .chart-period-label { fill: #89958f; font: 9px Inter, Arial, sans-serif; }.balance-axis-label { fill: #66829f; }.chart-period-label { font-size: 9px; }
+.chart-zero-line { stroke: #b7c1bb; stroke-width: 1.25; stroke-dasharray: 3 3; }
+.chart-axis-label, .chart-period-label { fill: #89958f; font: 9px Inter, Arial, sans-serif; }.balance-axis-label { fill: #66829f; }.chart-period-label { font-size: 9px; }.chart-zero-label { font-weight: 700; }
 .cashflow-bar { transition: opacity .15s ease; }.cashflow-bar.income-bar { fill: var(--forest-700); }.cashflow-bar.expense-bar { fill: #d6a448; }
 .balance-line { fill: none; stroke: var(--blue); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }.balance-point { fill: white; stroke: var(--blue); stroke-width: 2; vector-effect: non-scaling-stroke; }
 .chart-hit { fill: transparent; cursor: crosshair; outline: none; }.chart-hit:hover, .chart-hit:focus { fill: rgba(39,128,98,.045); }

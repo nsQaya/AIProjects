@@ -55,20 +55,43 @@ export function CashFlowChart({
     visibility.income ? finite(item.ui.income) : 0,
     visibility.expense ? finite(item.ui.expense) : 0,
   ]);
-  const barMax = Math.max(1, ...barValues);
   const balanceValues = items.map((item) => finite(item.ui.balance));
-  let balanceMin = Math.min(0, ...balanceValues);
-  let balanceMax = Math.max(0, ...balanceValues);
-  if (balanceMax === balanceMin) {
-    const padding = Math.max(1, Math.abs(balanceMax) * 0.1);
-    balanceMin -= padding;
-    balanceMax += padding;
-  }
-  const balanceRange = balanceMax - balanceMin;
-  const barY = (value: number) =>
-    CHART.top + plotHeight - (Math.max(0, finite(value)) / barMax) * plotHeight;
-  const balanceY = (value: number) =>
-    CHART.top + ((balanceMax - finite(value)) / balanceRange) * plotHeight;
+  // Income/expense bars never go negative, but the balance line can. Rather than
+  // scaling the two series on fully independent axes (which puts "0" at a
+  // different height for each - the bars' baseline at the bottom, the balance
+  // line's zero wherever its own min/max happens to fall), both series share one
+  // zero baseline (zeroY) here: a "positive zone" above it sized by whichever
+  // series reaches higher, and a "negative zone" below it sized by how negative
+  // the balance gets. A value of 0 in either series always lands on zeroY.
+  const balancePositiveExtent = visibility.balance ? Math.max(0, ...balanceValues) : 0;
+  const balanceNegativeExtent = visibility.balance ? Math.max(0, ...balanceValues.map((value) => -value)) : 0;
+  const positiveExtent = Math.max(1, ...barValues, balancePositiveExtent);
+  const hasNegativeZone = balanceNegativeExtent > 0;
+  const positiveRatio = hasNegativeZone
+    ? Math.min(0.82, Math.max(0.18, positiveExtent / (positiveExtent + balanceNegativeExtent)))
+    : 1;
+  const zeroY = CHART.top + plotHeight * positiveRatio;
+  const positiveZoneHeight = zeroY - CHART.top;
+  const negativeZoneHeight = CHART.top + plotHeight - zeroY;
+  const barY = (value: number) => {
+    const magnitude = Math.max(0, finite(value));
+    return positiveZoneHeight > 0 ? zeroY - (magnitude / positiveExtent) * positiveZoneHeight : zeroY;
+  };
+  const balanceY = (value: number) => {
+    const amount = finite(value);
+    if (amount >= 0) {
+      return positiveZoneHeight > 0 ? zeroY - (amount / positiveExtent) * positiveZoneHeight : zeroY;
+    }
+    return negativeZoneHeight > 0 ? zeroY + (-amount / balanceNegativeExtent) * negativeZoneHeight : zeroY;
+  };
+  const valueAtY = (y: number, extentAbove: number, extentBelow: number) =>
+    y <= zeroY
+      ? positiveZoneHeight > 0
+        ? (extentAbove * (zeroY - y)) / positiveZoneHeight
+        : 0
+      : negativeZoneHeight > 0
+        ? (-extentBelow * (y - zeroY)) / negativeZoneHeight
+        : 0;
   const labelEvery = Math.max(1, Math.ceil(items.length / 10));
   const activeItem = activeIndex === null ? null : (items[activeIndex] ?? null);
 
@@ -90,8 +113,8 @@ export function CashFlowChart({
         >
           {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
             const y = CHART.top + plotHeight * (1 - ratio);
-            const incomeExpenseValue = barMax * ratio;
-            const balanceValue = balanceMin + balanceRange * ratio;
+            const incomeExpenseValue = valueAtY(y, positiveExtent, 0);
+            const balanceValue = valueAtY(y, positiveExtent, balanceNegativeExtent);
             return (
               <g key={ratio}>
                 <line
@@ -123,15 +146,38 @@ export function CashFlowChart({
             );
           })}
 
+          {hasNegativeZone ? (
+            <g>
+              <line
+                className="chart-grid-line chart-zero-line"
+                data-cashflow-zero-line
+                x1={CHART.left}
+                y1={zeroY}
+                x2={CHART.width - CHART.right}
+                y2={zeroY}
+              />
+              <text className="chart-axis-label chart-zero-label" x={CHART.left - 10} y={zeroY + 3} textAnchor="end">
+                {shortMoney(0)}
+              </text>
+              {visibility.balance ? (
+                <text
+                  className="chart-axis-label balance-axis-label chart-zero-label"
+                  x={CHART.width - CHART.right + 10}
+                  y={zeroY + 3}
+                  textAnchor="start"
+                >
+                  {shortMoney(0)}
+                </text>
+              ) : null}
+            </g>
+          ) : null}
+
           {items.map((item, index) => {
             const center = CHART.left + step * (index + 0.5);
             const income = finite(item.ui.income);
             const expense = finite(item.ui.expense);
-            const incomeHeight = Math.max(income > 0 ? 2 : 0, CHART.top + plotHeight - barY(income));
-            const expenseHeight = Math.max(
-              expense > 0 ? 2 : 0,
-              CHART.top + plotHeight - barY(expense),
-            );
+            const incomeHeight = Math.max(income > 0 ? 2 : 0, zeroY - barY(income));
+            const expenseHeight = Math.max(expense > 0 ? 2 : 0, zeroY - barY(expense));
             return (
               <g key={`${item.periodStart}-${index}`}>
                 {visibility.income && income > 0 ? (
@@ -140,7 +186,7 @@ export function CashFlowChart({
                     data-cashflow-bar="income"
                     data-cashflow-bar-index={index}
                     x={center - (barSeriesCount === 2 ? barWidth + 2 : barWidth / 2)}
-                    y={CHART.top + plotHeight - incomeHeight}
+                    y={zeroY - incomeHeight}
                     width={barWidth}
                     height={incomeHeight}
                     rx="3"
@@ -152,7 +198,7 @@ export function CashFlowChart({
                     data-cashflow-bar="expense"
                     data-cashflow-bar-index={index}
                     x={center + (barSeriesCount === 2 ? 2 : -barWidth / 2)}
-                    y={CHART.top + plotHeight - expenseHeight}
+                    y={zeroY - expenseHeight}
                     width={barWidth}
                     height={expenseHeight}
                     rx="3"
