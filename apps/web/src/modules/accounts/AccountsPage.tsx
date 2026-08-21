@@ -1,5 +1,5 @@
 import { useState, type CSSProperties } from "react";
-import type { AccountType } from "@defterx/contracts";
+import type { AccountTypeDTO } from "@defterx/contracts";
 
 import { Button, InlineFeedback } from "../../components/ui";
 import { errorMessage } from "../../lib/error-message";
@@ -7,34 +7,18 @@ import { money, toNumber } from "../../lib/format";
 import { AccountDialog } from "./AccountDialog";
 import type { AccountViewModel, AccountsPageCallbacks } from "./account-types";
 
-const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
-  BANK: "Vadesiz hesap",
-  BUDGET: "Bütçe",
-  CASH: "Nakit",
-  CREDIT_CARD: "Kredi kartı",
-  CUSTOMER: "Müşteri",
-  OTHER: "Diğer",
-  PAYABLE: "Borç",
-  PERSONNEL: "Personel",
-  RECEIVABLE: "Alacak",
-  SAVINGS: "Birikim",
-  SUPPLIER: "Tedarikçi",
-};
-
-function accountSymbol(accountType: AccountType): string {
-  if (accountType === "CASH") return "₺";
-  if (accountType === "CREDIT_CARD") return "▰";
-  return "▥";
-}
+const DEFAULT_ACCOUNT_SYMBOL = "▥";
 
 export interface AccountsPageProps extends AccountsPageCallbacks {
   accounts: readonly AccountViewModel[];
+  accountTypes: readonly AccountTypeDTO[];
   busy?: boolean;
   confirmDelete?: (account: AccountViewModel) => boolean | Promise<boolean>;
 }
 
 export function AccountsPage({
   accounts,
+  accountTypes,
   busy = false,
   confirmDelete = (account) =>
     globalThis.confirm(`“${account.name}” hesabı silinsin mi? Kullanılmışsa arşivlenecektir.`),
@@ -45,8 +29,7 @@ export function AccountsPage({
   const [editingAccount, setEditingAccount] = useState<AccountViewModel | null | undefined>();
   const [deletingAccountId, setDeletingAccountId] = useState<string | null>(null);
   const [pageFeedback, setPageFeedback] = useState("");
-  const visibleAccounts = accounts.filter((account) => account.accountType !== "SAVINGS");
-  const total = visibleAccounts
+  const total = accounts
     .filter((account) => !account.isArchived)
     .reduce((sum, account) => sum + toNumber(account.displayBalance), 0);
 
@@ -86,13 +69,13 @@ export function AccountsPage({
       {pageFeedback ? <InlineFeedback tone="error">{pageFeedback}</InlineFeedback> : null}
 
       <div className="account-grid">
-        {visibleAccounts.length === 0 ? (
+        {accounts.length === 0 ? (
           <div className="empty-state">Henüz hesap tanımlanmadı.</div>
         ) : (
-          visibleAccounts.map((account) => {
+          accounts.map((account) => {
             const balance = toNumber(account.displayBalance);
             const style = {
-              "--account": account.accountType === "CREDIT_CARD" ? "#ad5048" : "#287b60",
+              "--account": account.allowNegativeBalance ? "#ad5048" : "#287b60",
             } as CSSProperties;
 
             return (
@@ -103,7 +86,7 @@ export function AccountsPage({
               >
                 <div className="account-top">
                   <span className="account-symbol" aria-hidden="true">
-                    {accountSymbol(account.accountType)}
+                    {account.accountTypeIcon ?? DEFAULT_ACCOUNT_SYMBOL}
                   </span>
                   <span className="row-actions">
                     <button
@@ -132,7 +115,7 @@ export function AccountsPage({
 
                 <div>
                   <small>
-                    {ACCOUNT_TYPE_LABELS[account.accountType]}
+                    {account.accountTypeName}
                     {account.isArchived ? " · Arşivli" : ""}
                   </small>
                   <h3>{account.name}</h3>
@@ -163,6 +146,7 @@ export function AccountsPage({
         <AccountDialog
           key={editingAccount?.id ?? "new-account"}
           account={editingAccount}
+          accountTypes={accountTypes}
           onClose={() => setEditingAccount(undefined)}
           onCreate={onCreateAccount}
           onUpdate={onUpdateAccount}

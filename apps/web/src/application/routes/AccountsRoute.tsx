@@ -7,6 +7,7 @@ export function AccountsRoute() {
   return (
     <AccountsPage
       accounts={snapshot.accounts}
+      accountTypes={snapshot.accountTypes.filter((accountType) => accountType.isActive)}
       busy={mutationBusy}
       onCreateAccount={(values) =>
         mutate(

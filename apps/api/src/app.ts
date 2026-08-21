@@ -9,6 +9,7 @@ import { authRoutes } from "./modules/auth/auth.routes";
 import { userRoutes } from "./modules/users/user.routes";
 import { bookRoutes } from "./modules/books/book.routes";
 import { accountRoutes } from "./modules/accounts/account.routes";
+import { accountTypeRoutes } from "./modules/accounts/account-type.routes";
 import { categoryRoutes } from "./modules/categories/category.routes";
 import { costCenterRoutes } from "./modules/cost-centers/cost-center.routes";
 import { contactRoutes } from "./modules/contacts/contact.routes";
@@ -58,11 +59,11 @@ app.get("/health/ready", async (c) => {
         AND has_table_privilege(current_user,'public.currency_daily_rates','SELECT,INSERT,UPDATE,DELETE') AS tables_ready,
       has_sequence_privilege(current_user,'public.transaction_number_seq','USAGE') AS sequence_ready`));
     const checks = result.rows[0]!;
-    const ready = checks.migration_count === 17 && checks.schema_ready && checks.tables_ready
+    const ready = checks.migration_count === 19 && checks.schema_ready && checks.tables_ready
       && checks.sequence_ready && secretBytes >= 32 && pepperBytes >= 32 && passwordResetPepperBytes >= 32;
     return c.json({ status: ready ? "ready" : "not_ready", checks: {
       database: true,
-      migrations: checks.migration_count === 17,
+      migrations: checks.migration_count === 19,
       schema: checks.schema_ready,
       tablePrivileges: checks.tables_ready,
       sequencePrivileges: checks.sequence_ready,
@@ -82,6 +83,7 @@ app.use("/api/v1/*", authenticate);
 app.route("/api/v1/me", userRoutes);
 app.route("/api/v1/books", bookRoutes);
 app.route("/api/v1/accounts", accountRoutes);
+app.route("/api/v1/account-types", accountTypeRoutes);
 app.route("/api/v1/categories", categoryRoutes);
 app.route("/api/v1/cost-centers", costCenterRoutes);
 app.route("/api/v1/contacts", contactRoutes);

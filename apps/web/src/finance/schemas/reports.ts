@@ -1,6 +1,5 @@
 import { z } from "zod";
 import {
-  accountTypeSchema,
   categoryTypeSchema,
   clientTransactionTypeSchema,
   scheduledTransactionTypeSchema,
@@ -22,7 +21,8 @@ export const dashboardReportSchema = z.object({
     z.object({
       id: uuidSchema,
       name: z.string(),
-      accountType: accountTypeSchema,
+      accountTypeId: uuidSchema,
+      accountTypeName: z.string(),
       currencyCode: currencyCodeSchema,
       creditLimit: decimalStringSchema.nullable(),
       balance: decimalStringSchema,
@@ -188,7 +188,8 @@ export const reportAnalyticsSchema = z.object({
 export const balanceReportItemSchema = z.object({
   id: uuidSchema,
   name: z.string(),
-  accountType: accountTypeSchema,
+  accountTypeId: uuidSchema,
+  accountTypeName: z.string(),
   currencyCode: currencyCodeSchema,
   balance: decimalStringSchema,
 });

@@ -28,18 +28,31 @@ export const createdBookSchema = bookSchema.extend({
 
 export const bookListSchema = itemListSchema(bookListItemSchema);
 
-export const accountTypeSchema = z.enum([
-  "CASH",
-  "BANK",
-  "CREDIT_CARD",
-  "CUSTOMER",
-  "SUPPLIER",
-  "RECEIVABLE",
-  "PAYABLE",
-  "SAVINGS",
-  "BUDGET",
-  "PERSONNEL",
-  "OTHER",
+export const accountTypeSchema = z.object({
+  id: uuidSchema,
+  bookId: uuidSchema,
+  name: z.string(),
+  icon: z.string().nullable(),
+  normalBalance: z.enum(["DEBIT", "CREDIT"]),
+  defaultAllowNegativeBalance: z.boolean(),
+  purpose: z.enum([
+    "SYSTEM_INCOME",
+    "SYSTEM_EXPENSE",
+    "SYSTEM_EQUITY",
+    "CUSTOMER",
+    "SUPPLIER",
+    "OTHER",
+  ]).nullable(),
+  isSystem: z.boolean(),
+  isActive: z.boolean(),
+  sortOrder: z.number().int(),
+  version: versionSchema,
+});
+
+export const accountTypeListSchema = itemListSchema(accountTypeSchema);
+export const deleteAccountTypeResponseSchema = z.union([
+  deletedEntitySchema,
+  deactivatedEntitySchema,
 ]);
 
 export const accountSchema = z.object({
@@ -47,7 +60,9 @@ export const accountSchema = z.object({
   bookId: uuidSchema,
   contactId: uuidSchema.nullable(),
   name: z.string(),
-  accountType: accountTypeSchema,
+  accountTypeId: uuidSchema,
+  accountTypeName: z.string(),
+  accountTypeIcon: z.string().nullable(),
   normalBalance: z.enum(["DEBIT", "CREDIT"]),
   currencyCode: currencyCodeSchema,
   allowNegativeBalance: z.boolean(),

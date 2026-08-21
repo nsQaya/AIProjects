@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type {
+  AccountTypeDTO,
   CategoryDTO,
   CostCenterDTO,
   CurrencyDTO,
@@ -20,6 +21,7 @@ import { isoAtLocalNoon, today } from "../../lib/date";
 import { errorMessage } from "../../lib/error-message";
 import { decimalString } from "../../lib/format";
 import type {
+  SaveAccountTypeInput,
   SaveCategoryInput,
   SaveCostCenterInput,
   SaveInstrumentInput,
@@ -374,6 +376,117 @@ export function InvestmentTypeDialog({
             />
           </label>
         </div>
+        <DialogFeedback message={error} />
+        <DialogActions>
+          <DialogCancelButton disabled={busy}>Vazgeç</DialogCancelButton>
+          <Button type="submit" variant="primary" loading={busy}>
+            Kaydet
+          </Button>
+        </DialogActions>
+      </form>
+    </Dialog>
+  );
+}
+
+interface AccountTypeDialogProps extends MutationDialogProps<SaveAccountTypeInput> {
+  accountType: AccountTypeDTO | null;
+}
+
+export function AccountTypeDialog({
+  accountType,
+  onClose,
+  onSave,
+}: AccountTypeDialogProps) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const balanceLocked = accountType?.purpose != null;
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const values = new FormData(event.currentTarget);
+    const name = formString(values, "name").trim();
+    const normalBalance = (balanceLocked
+      ? accountType?.normalBalance
+      : formString(values, "normalBalance")) as "DEBIT" | "CREDIT";
+    const defaultAllowNegativeBalance = values.has("defaultAllowNegativeBalance");
+    const sortOrder = Number(formString(values, "sortOrder")) || 0;
+    const input: SaveAccountTypeInput = accountType
+      ? {
+          mode: "update",
+          id: accountType.id,
+          name,
+          normalBalance,
+          defaultAllowNegativeBalance,
+          sortOrder,
+          version: accountType.version,
+        }
+      : { mode: "create", name, normalBalance, defaultAllowNegativeBalance, sortOrder };
+
+    setError(null);
+    setBusy(true);
+    void onSave(input)
+      .then(onClose)
+      .catch((reason: unknown) => setError(mutationErrorMessage(reason)))
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <Dialog
+      id="account-type-dialog"
+      className="compact-dialog"
+      open
+      onClose={onClose}
+    >
+      <form id="account-type-form" onSubmit={handleSubmit} aria-busy={busy || undefined}>
+        <input type="hidden" name="accountTypeId" value={accountType?.id ?? ""} />
+        <input type="hidden" name="version" value={accountType?.version ?? ""} />
+        <DialogHeader eyebrow="Hesap ayarı" title="Hesap türü" />
+        <div className="form-grid dialog-form-grid">
+          <label className="full-field">
+            <span>Tür adı</span>
+            <input
+              name="name"
+              maxLength={80}
+              defaultValue={accountType?.name ?? ""}
+              disabled={busy}
+              required
+            />
+          </label>
+          <label>
+            <span>Bakiye yönü</span>
+            <select
+              name="normalBalance"
+              defaultValue={accountType?.normalBalance ?? "DEBIT"}
+              disabled={busy || balanceLocked}
+            >
+              <option value="DEBIT">Borç (varlık)</option>
+              <option value="CREDIT">Alacak (borç/kaynak)</option>
+            </select>
+          </label>
+          <label className="checkbox-field full-field">
+            <input
+              name="defaultAllowNegativeBalance"
+              type="checkbox"
+              defaultChecked={accountType?.defaultAllowNegativeBalance ?? false}
+              disabled={busy}
+            />
+            <span>Yeni hesaplarda eksi bakiyeye varsayılan olarak izin ver</span>
+          </label>
+          <label>
+            <span>Sıra</span>
+            <input
+              name="sortOrder"
+              type="number"
+              defaultValue={accountType?.sortOrder ?? 0}
+              disabled={busy}
+            />
+          </label>
+        </div>
+        {balanceLocked ? (
+          <p style={{ color: "var(--muted)", fontSize: 11 }}>
+            Bu tür sistem tarafından kullanılıyor; bakiye yönü değiştirilemez.
+          </p>
+        ) : null}
         <DialogFeedback message={error} />
         <DialogActions>
           <DialogCancelButton disabled={busy}>Vazgeç</DialogCancelButton>

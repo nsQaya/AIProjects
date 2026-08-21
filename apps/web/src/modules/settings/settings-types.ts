@@ -1,4 +1,5 @@
 import type {
+  AccountTypeDTO,
   BookDTO,
   CategoryDTO,
   CategoryType,
@@ -6,6 +7,7 @@ import type {
   CurrencyDTO,
   CurrencyRateAtDateDTO,
   CurrencyRateSyncRunDTO,
+  Direction,
   InvestmentAssetTypeDTO,
   InvestmentInstrumentDTO,
   InvestmentPriceAtDateDTO,
@@ -25,6 +27,7 @@ export interface SettingsViewModel {
   apiBaseUrl: string;
   apiStatus: SettingsApiStatus;
   book: Pick<BookDTO, "baseCurrency" | "name"> | null;
+  accountTypes: readonly AccountTypeDTO[];
   categories: readonly CategoryDTO[];
   costCenters: readonly CostCenterDTO[];
   currencies: readonly CurrencyDTO[];
@@ -78,6 +81,24 @@ export type SaveInvestmentTypeInput =
       version: Version;
     };
 
+export type SaveAccountTypeInput =
+  | {
+      mode: "create";
+      name: string;
+      normalBalance: Direction;
+      defaultAllowNegativeBalance: boolean;
+      sortOrder: number;
+    }
+  | {
+      mode: "update";
+      id: string;
+      name: string;
+      normalBalance: Direction;
+      defaultAllowNegativeBalance: boolean;
+      sortOrder: number;
+      version: Version;
+    };
+
 export type SaveInstrumentInput =
   | {
       mode: "create";
@@ -112,10 +133,12 @@ export interface VersionedSettingsEntity {
 }
 
 export interface SettingsActions {
+  onActivateAccountType: (entity: VersionedSettingsEntity) => Promise<void>;
   onActivateCategory: (entity: VersionedSettingsEntity) => Promise<void>;
   onActivateCostCenter: (entity: VersionedSettingsEntity) => Promise<void>;
   onActivateInstrument: (entity: VersionedSettingsEntity) => Promise<void>;
   onActivateInvestmentType: (entity: VersionedSettingsEntity) => Promise<void>;
+  onDeleteAccountType: (entity: VersionedSettingsEntity) => Promise<void>;
   onDeleteCategory: (entity: VersionedSettingsEntity) => Promise<void>;
   onDeleteCostCenter: (entity: VersionedSettingsEntity) => Promise<void>;
   onDeleteInstrument: (entity: VersionedSettingsEntity) => Promise<void>;
@@ -125,6 +148,7 @@ export interface SettingsActions {
     currentPassword: string;
     newPassword: string;
   }) => Promise<void>;
+  onSaveAccountType: (input: SaveAccountTypeInput) => Promise<void>;
   onSaveCategory: (input: SaveCategoryInput) => Promise<void>;
   onSaveCostCenter: (input: SaveCostCenterInput) => Promise<void>;
   onSaveInstrument: (input: SaveInstrumentInput) => Promise<void>;

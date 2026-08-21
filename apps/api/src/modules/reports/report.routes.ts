@@ -57,12 +57,13 @@ export async function loadDashboardRecentTransactions(pool: DbClient, bookId: st
 
 const incomeExpenseSql = `
   SELECT
-    COALESCE(SUM(CASE WHEN a.account_type='SYSTEM_INCOME' AND e.direction='CREDIT' THEN e.base_amount
-                      WHEN a.account_type='SYSTEM_INCOME' THEN -e.base_amount ELSE 0 END),0)::text AS income,
-    COALESCE(SUM(CASE WHEN a.account_type='SYSTEM_EXPENSE' AND e.direction='DEBIT' THEN e.base_amount
-                      WHEN a.account_type='SYSTEM_EXPENSE' THEN -e.base_amount ELSE 0 END),0)::text AS expense
+    COALESCE(SUM(CASE WHEN at.purpose='SYSTEM_INCOME' AND e.direction='CREDIT' THEN e.base_amount
+                      WHEN at.purpose='SYSTEM_INCOME' THEN -e.base_amount ELSE 0 END),0)::text AS income,
+    COALESCE(SUM(CASE WHEN at.purpose='SYSTEM_EXPENSE' AND e.direction='DEBIT' THEN e.base_amount
+                      WHEN at.purpose='SYSTEM_EXPENSE' THEN -e.base_amount ELSE 0 END),0)::text AS expense
   FROM transaction_entries e
   JOIN accounts a ON a.id=e.account_id
+  JOIN account_types at ON at.id=a.account_type_id
   JOIN transactions t ON t.id=e.transaction_id
   WHERE t.book_id=$1 AND t.status='POSTED' AND t.transaction_type<>'REVERSAL' AND t.transaction_date BETWEEN $2 AND $3`;
 
@@ -92,18 +93,19 @@ export async function loadIncomeExpenseReport(
   ),pool.query(
     `SELECT cc.id,cc.name,cc.is_active AS "isActive",
             COALESCE(SUM(CASE
-              WHEN a.account_type='SYSTEM_INCOME' AND e.direction='CREDIT' THEN e.base_amount
-              WHEN a.account_type='SYSTEM_INCOME' THEN -e.base_amount
-              WHEN a.account_type='SYSTEM_EXPENSE' AND e.direction='DEBIT' THEN -e.base_amount
-              WHEN a.account_type='SYSTEM_EXPENSE' THEN e.base_amount
+              WHEN at.purpose='SYSTEM_INCOME' AND e.direction='CREDIT' THEN e.base_amount
+              WHEN at.purpose='SYSTEM_INCOME' THEN -e.base_amount
+              WHEN at.purpose='SYSTEM_EXPENSE' AND e.direction='DEBIT' THEN -e.base_amount
+              WHEN at.purpose='SYSTEM_EXPENSE' THEN e.base_amount
               ELSE 0 END),0)::text amount
      FROM cost_centers cc
      JOIN transactions t ON t.cost_center_id=cc.id
      JOIN transaction_entries e ON e.transaction_id=t.id
      JOIN accounts a ON a.id=e.account_id
+     JOIN account_types at ON at.id=a.account_type_id
      WHERE cc.book_id=$1 AND t.status='POSTED' AND t.transaction_type<>'REVERSAL'
        AND t.transaction_date BETWEEN $2 AND $3
-       AND a.account_type IN ('SYSTEM_INCOME','SYSTEM_EXPENSE')
+       AND at.purpose IN ('SYSTEM_INCOME','SYSTEM_EXPENSE')
        AND ($5::boolean OR EXISTS (
          SELECT 1 FROM transaction_entries scoped_e
          JOIN accounts scoped_a ON scoped_a.id=scoped_e.account_id
@@ -121,17 +123,18 @@ reportRoutes.get("/dashboard",async (c) => {
   const [summary,accounts,recent,upcoming] = await Promise.all([
     pool.query(incomeExpenseSql,[bookId,from,to]),
     pool.query(
-      `SELECT a.id,a.name,a.account_type AS "accountType",a.currency_code AS "currencyCode",
+      `SELECT a.id,a.name,a.account_type_id AS "accountTypeId",at.name AS "accountTypeName",a.currency_code AS "currencyCode",
               a.credit_limit::text AS "creditLimit",
               (CASE WHEN a.normal_balance='DEBIT'
                 THEN COALESCE(SUM(CASE WHEN t.id IS NULL THEN 0 WHEN e.direction='DEBIT' THEN e.base_amount ELSE -e.base_amount END),0)
                 ELSE -COALESCE(SUM(CASE WHEN t.id IS NULL THEN 0 WHEN e.direction='CREDIT' THEN e.base_amount ELSE -e.base_amount END),0)
               END)::text AS balance
        FROM accounts a
+       JOIN account_types at ON at.id=a.account_type_id
        LEFT JOIN transaction_entries e ON e.account_id=a.id
        LEFT JOIN transactions t ON t.id=e.transaction_id AND t.status='POSTED' AND t.transaction_type<>'REVERSAL'
        WHERE a.book_id=$1 AND a.is_system=false AND a.deleted_at IS NULL AND a.is_archived=false
-       GROUP BY a.id ORDER BY a.sort_order,a.name LIMIT 8`,
+       GROUP BY a.id,at.name ORDER BY a.sort_order,a.name LIMIT 8`,
       [bookId],
     ),
     loadDashboardRecentTransactions(pool,bookId),
@@ -159,11 +162,14 @@ reportRoutes.get("/cash-flow",async (c) => {
        SELECT generate_series(date_trunc($4,$2::timestamptz),date_trunc($4,$3::timestamptz),$5::interval) AS bucket
      ), totals AS (
        SELECT date_trunc($4,t.transaction_date) AS bucket,
-         SUM(CASE WHEN a.account_type='SYSTEM_INCOME' AND e.direction='CREDIT' THEN e.base_amount
-                  WHEN a.account_type='SYSTEM_INCOME' THEN -e.base_amount ELSE 0 END) income,
-         SUM(CASE WHEN a.account_type='SYSTEM_EXPENSE' AND e.direction='DEBIT' THEN e.base_amount
-                  WHEN a.account_type='SYSTEM_EXPENSE' THEN -e.base_amount ELSE 0 END) expense
-       FROM transaction_entries e JOIN accounts a ON a.id=e.account_id JOIN transactions t ON t.id=e.transaction_id
+         SUM(CASE WHEN at.purpose='SYSTEM_INCOME' AND e.direction='CREDIT' THEN e.base_amount
+                  WHEN at.purpose='SYSTEM_INCOME' THEN -e.base_amount ELSE 0 END) income,
+         SUM(CASE WHEN at.purpose='SYSTEM_EXPENSE' AND e.direction='DEBIT' THEN e.base_amount
+                  WHEN at.purpose='SYSTEM_EXPENSE' THEN -e.base_amount ELSE 0 END) expense
+       FROM transaction_entries e
+       JOIN accounts a ON a.id=e.account_id
+       JOIN account_types at ON at.id=a.account_type_id
+       JOIN transactions t ON t.id=e.transaction_id
        WHERE t.book_id=$1 AND t.status='POSTED' AND t.transaction_type<>'REVERSAL' AND t.transaction_date BETWEEN $2 AND $3
        GROUP BY 1
      )
@@ -214,15 +220,17 @@ reportRoutes.get("/income-expense",async (c) => {
 reportRoutes.get("/balances",async (c) => {
   const {pool,bookId} = await context(c);
   const result = await pool.query(
-    `SELECT a.id,a.name,a.account_type AS "accountType",a.currency_code AS "currencyCode",
+    `SELECT a.id,a.name,a.account_type_id AS "accountTypeId",at.name AS "accountTypeName",a.currency_code AS "currencyCode",
             (CASE WHEN a.normal_balance='DEBIT'
               THEN COALESCE(SUM(CASE WHEN t.id IS NULL THEN 0 WHEN e.direction='DEBIT' THEN e.base_amount ELSE -e.base_amount END),0)
               ELSE -COALESCE(SUM(CASE WHEN t.id IS NULL THEN 0 WHEN e.direction='CREDIT' THEN e.base_amount ELSE -e.base_amount END),0)
             END)::text balance
-     FROM accounts a LEFT JOIN transaction_entries e ON e.account_id=a.id
+     FROM accounts a
+     JOIN account_types at ON at.id=a.account_type_id
+     LEFT JOIN transaction_entries e ON e.account_id=a.id
      LEFT JOIN transactions t ON t.id=e.transaction_id AND t.status='POSTED' AND t.transaction_type<>'REVERSAL'
      WHERE a.book_id=$1 AND a.is_system=false AND a.deleted_at IS NULL
-     GROUP BY a.id ORDER BY a.name`,
+     GROUP BY a.id,at.name ORDER BY a.name`,
     [bookId],
   );
   return c.json({items:result.rows});

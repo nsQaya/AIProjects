@@ -1,4 +1,3 @@
-import type { AccountType } from "./accounts.js";
 import type { CategoryType } from "./categories.js";
 import type { CurrencyCode, ISODateTimeString, MoneyString, UUID } from "./common.js";
 import type { ScheduledTransactionType } from "./scheduled-transactions.js";
@@ -21,7 +20,8 @@ export interface DashboardMonthSummaryDTO {
 export interface DashboardAccountDTO {
   id: UUID;
   name: string;
-  accountType: AccountType;
+  accountTypeId: UUID;
+  accountTypeName: string;
   currencyCode: CurrencyCode;
   creditLimit: MoneyString | null;
   balance: MoneyString;
@@ -221,7 +221,8 @@ export interface ReportAnalyticsResponse {
 export interface BalanceReportItemDTO {
   id: UUID;
   name: string;
-  accountType: AccountType;
+  accountTypeId: UUID;
+  accountTypeName: string;
   currencyCode: CurrencyCode;
   balance: MoneyString;
 }

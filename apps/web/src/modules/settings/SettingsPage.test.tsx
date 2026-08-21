@@ -1,7 +1,7 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type {
-  CategoryDTO,CostCenterDTO,CurrencyDTO,InvestmentAssetTypeDTO,InvestmentInstrumentDTO,MarketPriceSyncRunDTO,
+  AccountTypeDTO,CategoryDTO,CostCenterDTO,CurrencyDTO,InvestmentAssetTypeDTO,InvestmentInstrumentDTO,MarketPriceSyncRunDTO,
 } from "@defterx/contracts";
 import { describe, expect, it, vi } from "vitest";
 
@@ -40,6 +40,11 @@ const inactiveCostCenter: CostCenterDTO = {
   version: 5,
 };
 
+const accountType:AccountTypeDTO={
+  id:"account-type-1",bookId:"book-1",name:"Banka",icon:null,normalBalance:"DEBIT",
+  defaultAllowNegativeBalance:false,purpose:null,isSystem:true,isActive:true,sortOrder:1,version:1,
+};
+
 const investmentType:InvestmentAssetTypeDTO={
   id:"type-1",bookId:"book-1",name:"Hisse",icon:null,isSystem:true,isActive:true,sortOrder:1,version:1,
 };
@@ -70,6 +75,7 @@ function settingsModel(
     apiBaseUrl: "https://api.example.test",
     apiStatus: { online: true, reason: "Canlı API yanıt veriyor." },
     book: { name: "Kişisel Defter", baseCurrency: "TRY" },
+    accountTypes: [],
     categories,
     costCenters,
     currencies,
@@ -81,16 +87,19 @@ function settingsModel(
 
 function settingsActions(overrides: Partial<SettingsActions> = {}): SettingsActions {
   return {
+    onActivateAccountType: vi.fn(() => Promise.resolve()),
     onActivateCategory: vi.fn(() => Promise.resolve()),
     onActivateCostCenter: vi.fn(() => Promise.resolve()),
     onActivateInstrument: vi.fn(() => Promise.resolve()),
     onActivateInvestmentType: vi.fn(() => Promise.resolve()),
+    onDeleteAccountType: vi.fn(() => Promise.resolve()),
     onDeleteCategory: vi.fn(() => Promise.resolve()),
     onDeleteCostCenter: vi.fn(() => Promise.resolve()),
     onDeleteInstrument: vi.fn(() => Promise.resolve()),
     onDeleteInvestmentType: vi.fn(() => Promise.resolve()),
     onLogout: vi.fn(() => Promise.resolve()),
     onChangePassword: vi.fn(() => Promise.resolve()),
+    onSaveAccountType: vi.fn(() => Promise.resolve()),
     onSaveCategory: vi.fn(() => Promise.resolve()),
     onSaveCostCenter: vi.fn(() => Promise.resolve()),
     onSaveInstrument: vi.fn(() => Promise.resolve()),
@@ -345,6 +354,61 @@ describe("SettingsPage cost center management", () => {
         version: inactiveCostCenter.version,
       });
     });
+  });
+});
+
+describe("SettingsPage account type management",()=>{
+  it("edits a custom account type's name, balance direction and sort order",async()=>{
+    const user=userEvent.setup();
+    const onSaveAccountType=vi.fn(()=>Promise.resolve());
+    const { container }=render(<SettingsPage model={{...settingsModel(),accountTypes:[accountType]}} actions={settingsActions({
+      onSaveAccountType,
+    })}/>);
+
+    await user.click(container.querySelector<HTMLButtonElement>('[data-edit-account-type="account-type-1"]')!);
+    const dialog=await screen.findByRole("dialog",{name:"Hesap türü"});
+    expect(within(dialog).getByLabelText("Bakiye yönü")).toBeEnabled();
+    await user.clear(within(dialog).getByLabelText("Tür adı"));
+    await user.type(within(dialog).getByLabelText("Tür adı"),"Vadesiz");
+    await user.selectOptions(within(dialog).getByLabelText("Bakiye yönü"),"CREDIT");
+    await user.clear(within(dialog).getByLabelText("Sıra"));
+    await user.type(within(dialog).getByLabelText("Sıra"),"5");
+    await user.click(within(dialog).getByRole("button",{name:"Kaydet"}));
+
+    await waitFor(()=>expect(onSaveAccountType).toHaveBeenCalledWith({
+      mode:"update",id:"account-type-1",name:"Vadesiz",
+      normalBalance:"CREDIT",defaultAllowNegativeBalance:false,sortOrder:5,version:1,
+    }));
+  });
+
+  it("locks the balance direction for a type tied to a system role",async()=>{
+    const user=userEvent.setup();
+    const purposeLockedType:AccountTypeDTO={...accountType,id:"account-type-2",name:"Tedarikçi",purpose:"SUPPLIER"};
+    const { container }=render(<SettingsPage model={{...settingsModel(),accountTypes:[purposeLockedType]}} actions={settingsActions()}/>);
+
+    await user.click(container.querySelector<HTMLButtonElement>('[data-edit-account-type="account-type-2"]')!);
+    const dialog=await screen.findByRole("dialog",{name:"Hesap türü"});
+    expect(within(dialog).getByLabelText("Bakiye yönü")).toBeDisabled();
+  });
+
+  it("creates a custom account type with its own balance direction",async()=>{
+    const user=userEvent.setup();
+    const onSaveAccountType=vi.fn(()=>Promise.resolve());
+    const { container }=render(<SettingsPage model={settingsModel()} actions={settingsActions({
+      onSaveAccountType,
+    })}/>);
+
+    await user.click(container.querySelector<HTMLButtonElement>("#open-account-type-dialog")!);
+    const dialog=await screen.findByRole("dialog",{name:"Hesap türü"});
+    await user.type(within(dialog).getByLabelText("Tür adı"),"Kredi kartı 2");
+    await user.selectOptions(within(dialog).getByLabelText("Bakiye yönü"),"CREDIT");
+    await user.click(within(dialog).getByLabelText("Yeni hesaplarda eksi bakiyeye varsayılan olarak izin ver"));
+    await user.click(within(dialog).getByRole("button",{name:"Kaydet"}));
+
+    await waitFor(()=>expect(onSaveAccountType).toHaveBeenCalledWith({
+      mode:"create",name:"Kredi kartı 2",
+      normalBalance:"CREDIT",defaultAllowNegativeBalance:true,sortOrder:0,
+    }));
   });
 });
 

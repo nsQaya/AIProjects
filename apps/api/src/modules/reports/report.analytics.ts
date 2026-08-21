@@ -71,12 +71,13 @@ export async function loadReportAnalytics(
            SELECT generate_series(date_trunc($6,$2::timestamptz),date_trunc($6,$3::timestamptz),$7::interval) bucket
          ), totals AS (
            SELECT date_trunc($6,t.transaction_date) bucket,
-             SUM(CASE WHEN a.account_type='SYSTEM_INCOME' AND e.direction='CREDIT' THEN e.base_amount
-                      WHEN a.account_type='SYSTEM_INCOME' THEN -e.base_amount ELSE 0 END) income,
-             SUM(CASE WHEN a.account_type='SYSTEM_EXPENSE' AND e.direction='DEBIT' THEN e.base_amount
-                      WHEN a.account_type='SYSTEM_EXPENSE' THEN -e.base_amount ELSE 0 END) expense
+             SUM(CASE WHEN at.purpose='SYSTEM_INCOME' AND e.direction='CREDIT' THEN e.base_amount
+                      WHEN at.purpose='SYSTEM_INCOME' THEN -e.base_amount ELSE 0 END) income,
+             SUM(CASE WHEN at.purpose='SYSTEM_EXPENSE' AND e.direction='DEBIT' THEN e.base_amount
+                      WHEN at.purpose='SYSTEM_EXPENSE' THEN -e.base_amount ELSE 0 END) expense
            FROM transaction_entries e
            JOIN accounts a ON a.id=e.account_id
+           JOIN account_types at ON at.id=a.account_type_id
            JOIN transactions t ON t.id=e.transaction_id
            WHERE t.book_id=$1 AND t.status='POSTED' AND t.transaction_type<>'REVERSAL'
              AND t.transaction_date BETWEEN $2 AND $3
@@ -230,46 +231,6 @@ export async function loadReportAnalytics(
         scopeValues,
       ),
       pool.query(
-        `WITH selected_accounts AS (${accountScope}), periods AS (
-           SELECT generate_series(date_trunc($6,$2::timestamptz),date_trunc($6,$3::timestamptz),$7::interval) bucket
-         ), positions_at_period AS (
-           SELECT p.bucket,
-             COALESCE(SUM(
-               (l.quantity - COALESCE(SUM(s.quantity) FILTER (WHERE s.sold_at <= p.bucket), 0)) *
-               COALESCE(latest_price.price, 0) *
-               COALESCE(fx.try_rate, 1)
-             ), 0) value
-           FROM periods p
-           CROSS JOIN investment_lots l
-           JOIN investment_instruments i ON i.id=l.instrument_id
-           LEFT JOIN selected_accounts sa ON sa.id=l.account_id
-           LEFT JOIN investment_sales s ON s.book_id=$1 AND s.instrument_id=l.instrument_id AND s.deleted_at IS NULL
-           LEFT JOIN LATERAL (
-             SELECT candidate.price FROM (
-               SELECT ip.price,ip.priced_at,0 priority FROM investment_prices ip
-               WHERE ip.instrument_id=i.id AND ip.priced_at <= p.bucket
-               UNION ALL
-               SELECT mp.close AS price,(mp.price_date::timestamp AT TIME ZONE 'Europe/Istanbul'),1 priority
-               FROM market_daily_prices mp WHERE mp.market_symbol_id=i.market_symbol_id
-                 AND mp.price_date<=($3::timestamptz AT TIME ZONE 'Europe/Istanbul')::date
-             ) candidate ORDER BY candidate.priced_at DESC,candidate.priority LIMIT 1
-           ) latest_price ON true
-           LEFT JOIN LATERAL (
-             SELECT try_rate FROM currency_daily_rates
-             WHERE currency_code=i.currency_code ORDER BY rate_date DESC LIMIT 1
-           ) fx ON i.currency_code<>'TRY'
-           WHERE l.book_id=$1 AND l.deleted_at IS NULL
-             AND ($5::boolean OR sa.id IS NOT NULL)
-             AND l.purchased_at <= p.bucket
-           GROUP BY p.bucket
-         )
-         SELECT to_char(p.bucket,$8) period,p.bucket AS "periodStart",COALESCE(pap.value,0)::text value
-         FROM periods p
-         LEFT JOIN positions_at_period pap ON pap.bucket=p.bucket
-         ORDER BY p.bucket`,
-        seriesValues,
-      ),
-      pool.query(
         `WITH selected_accounts AS (${accountScope}), scoped_purchases AS (
            SELECT l.instrument_id,SUM(l.quantity) quantity,SUM(l.quantity*l.unit_price) cost_basis
            FROM investment_lots l
@@ -334,6 +295,58 @@ export async function loadReportAnalytics(
                 COALESCE(SUM(CASE WHEN price IS NULL OR try_rate IS NULL THEN 0 ELSE quantity*price*try_rate-cost_basis*try_rate END) OVER (),0)::text AS "totalUnrealizedGain"
          FROM positions WHERE quantity>0 OR realized_gain<>0 ORDER BY "assetTypeName",name`,
         scopeValues,
+      ),
+      pool.query(
+        `WITH selected_accounts AS (${accountScope}), periods AS (
+           SELECT generate_series(date_trunc($6,$2::timestamptz),date_trunc($6,$3::timestamptz),$7::interval) bucket
+         ), purchased AS (
+           SELECT l.instrument_id,p.bucket,
+             SUM(l.quantity) FILTER (WHERE l.purchased_at <= p.bucket) qty
+           FROM periods p
+           CROSS JOIN investment_lots l
+           LEFT JOIN selected_accounts sa ON sa.id=l.account_id
+           WHERE l.book_id=$1 AND l.deleted_at IS NULL
+             AND ($5::boolean OR sa.id IS NOT NULL)
+           GROUP BY l.instrument_id,p.bucket
+         ), sold AS (
+           SELECT s.instrument_id,p.bucket,
+             SUM(s.quantity) FILTER (WHERE s.sold_at <= p.bucket) qty
+           FROM periods p
+           CROSS JOIN investment_sales s
+           WHERE s.book_id=$1 AND s.deleted_at IS NULL
+           GROUP BY s.instrument_id,p.bucket
+         ), positions AS (
+           SELECT pu.bucket,pu.instrument_id,
+             GREATEST(COALESCE(pu.qty,0)-COALESCE(so.qty,0),0) net_qty
+           FROM purchased pu
+           LEFT JOIN sold so ON so.instrument_id=pu.instrument_id AND so.bucket=pu.bucket
+         ), valued AS (
+           SELECT pos.bucket,
+             SUM(pos.net_qty*COALESCE(latest_price.price,0)*COALESCE(fx.try_rate,1)) value
+           FROM positions pos
+           JOIN investment_instruments i ON i.id=pos.instrument_id
+           LEFT JOIN LATERAL (
+             SELECT candidate.price FROM (
+               SELECT ip.price,ip.priced_at,0 priority FROM investment_prices ip
+               WHERE ip.instrument_id=i.id AND ip.priced_at <= pos.bucket
+               UNION ALL
+               SELECT mp.close AS price,(mp.price_date::timestamp AT TIME ZONE 'Europe/Istanbul'),1 priority
+               FROM market_daily_prices mp WHERE mp.market_symbol_id=i.market_symbol_id
+                 AND mp.price_date<=(pos.bucket AT TIME ZONE 'Europe/Istanbul')::date
+             ) candidate ORDER BY candidate.priced_at DESC,candidate.priority LIMIT 1
+           ) latest_price ON true
+           LEFT JOIN LATERAL (
+             SELECT try_rate FROM currency_daily_rates
+             WHERE currency_code=i.currency_code ORDER BY rate_date DESC LIMIT 1
+           ) fx ON i.currency_code<>'TRY'
+           WHERE pos.net_qty>0
+           GROUP BY pos.bucket
+         )
+         SELECT to_char(p.bucket,$8) period,p.bucket AS "periodStart",COALESCE(v.value,0)::text value
+         FROM periods p
+         LEFT JOIN valued v ON v.bucket=p.bucket
+         ORDER BY p.bucket`,
+        seriesValues,
       ),
       pool.query<{ cashBalance: string }>(
         `WITH selected_accounts AS (${accountScope})

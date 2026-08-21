@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import type { AccountType, MoneyString } from "@defterx/contracts";
+import type { AccountTypeDTO, MoneyString } from "@defterx/contracts";
 
 import {
   Button,
@@ -18,15 +18,9 @@ import type {
   UpdateAccountValues,
 } from "./account-types";
 
-const ACCOUNT_TYPE_OPTIONS = [
-  { value: "BANK", label: "Vadesiz / banka" },
-  { value: "CASH", label: "Nakit" },
-  { value: "CREDIT_CARD", label: "Kredi kartı" },
-  { value: "OTHER", label: "Diğer" },
-] as const satisfies ReadonlyArray<{ value: AccountType; label: string }>;
-
 interface AccountDialogProps {
   account: AccountViewModel | null;
+  accountTypes: readonly AccountTypeDTO[];
   onClose: () => void;
   onCreate: (values: CreateAccountValues) => AccountMutation;
   onUpdate: (id: string, values: UpdateAccountValues) => AccountMutation;
@@ -49,12 +43,15 @@ function nonNegativeMoney(value: string, label: string): MoneyString {
 
 export function AccountDialog({
   account,
+  accountTypes,
   onClose,
   onCreate,
   onUpdate,
 }: AccountDialogProps) {
   const editing = account !== null;
-  const [accountType, setAccountType] = useState<AccountType>(account?.accountType ?? "BANK");
+  const [accountTypeId, setAccountTypeId] = useState(
+    account?.accountTypeId ?? accountTypes[0]?.id ?? "",
+  );
   const [openingBalance, setOpeningBalance] = useState("0");
   const [allowNegativeBalance, setAllowNegativeBalance] = useState(
     account?.allowNegativeBalance ?? false,
@@ -63,9 +60,10 @@ export function AccountDialog({
   const [feedback, setFeedback] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  const handleAccountTypeChange = (value: AccountType) => {
-    const allowsNegative = value === "CREDIT_CARD";
-    setAccountType(value);
+  const handleAccountTypeChange = (value: string) => {
+    const type = accountTypes.find((option) => option.id === value);
+    const allowsNegative = type?.defaultAllowNegativeBalance ?? false;
+    setAccountTypeId(value);
     setAllowNegativeBalance(allowsNegative);
     if (!allowsNegative) setCreditLimit("");
   };
@@ -85,18 +83,19 @@ export function AccountDialog({
         const value = form.get(key);
         return typeof value === "string" ? value : "";
       };
-      const submittedAccountType = read("accountType") as AccountType;
+      const submittedAccountTypeId = read("accountTypeId");
       const submittedAllowNegative = form.has("allowNegativeBalance");
       const submittedCreditLimit = read("creditLimit");
       const trimmedName = read("name").trim();
       if (!trimmedName) throw new Error("Hesap adı zorunludur.");
+      if (!submittedAccountTypeId) throw new Error("Hesap türü zorunludur.");
 
       const normalizedLimit = submittedAllowNegative && submittedCreditLimit.trim()
         ? nonNegativeMoney(submittedCreditLimit, "Eksi bakiye / kredi limiti")
         : null;
       const values = {
         name: trimmedName,
-        accountType: submittedAccountType,
+        accountTypeId: submittedAccountTypeId,
         allowNegativeBalance: submittedAllowNegative,
         creditLimit: normalizedLimit,
       } satisfies AccountFormValues;
@@ -150,17 +149,17 @@ export function AccountDialog({
           <label>
             <span>Hesap türü</span>
             <select
-              name="accountType"
+              name="accountTypeId"
               required
-              value={accountType}
-              onChange={(event) => handleAccountTypeChange(event.currentTarget.value as AccountType)}
+              value={accountTypeId}
+              onChange={(event) => handleAccountTypeChange(event.currentTarget.value)}
             >
-              {!ACCOUNT_TYPE_OPTIONS.some((option) => option.value === accountType) ? (
-                <option value={accountType}>{accountType}</option>
+              {!accountTypes.some((option) => option.id === accountTypeId) && account ? (
+                <option value={accountTypeId}>{account.accountTypeName}</option>
               ) : null}
-              {ACCOUNT_TYPE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
+              {accountTypes.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.name}
                 </option>
               ))}
             </select>

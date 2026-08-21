@@ -23,8 +23,8 @@ const EXPENSE_ID = "00000000-0000-4000-8000-000000000007";
 const COST_CENTER_ID = "00000000-0000-4000-8000-000000000008";
 
 const accounts: readonly AccountView[] = [
-  account(BANK_ID, "Banka", "BANK"),
-  account(CASH_ID, "Nakit", "CASH"),
+  account(BANK_ID, "Banka", "Banka"),
+  account(CASH_ID, "Nakit", "Nakit"),
 ];
 
 const categories: readonly CategoryDTO[] = [
@@ -80,14 +80,16 @@ const transactions: readonly TransactionView[] = [
 function account(
   id: string,
   name: string,
-  accountType: AccountView["accountType"],
+  accountTypeName: string,
 ): AccountView {
   return {
     id,
     bookId: BOOK_ID,
     contactId: null,
     name,
-    accountType,
+    accountTypeId: `type-${accountTypeName.toLowerCase()}`,
+    accountTypeName,
+    accountTypeIcon: null,
     normalBalance: "DEBIT",
     currencyCode: "TRY",
     allowNegativeBalance: false,

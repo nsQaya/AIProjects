@@ -1,6 +1,7 @@
 import { inTransaction } from "../../infrastructure/database";
 import { AppError } from "../../common/errors";
 import type { DbClient } from "../../infrastructure/database";
+import { getSystemAccountType } from "../accounts/system-accounts";
 
 export async function createBook(pool: DbClient, userId: string, input: { name: string; bookType: string; baseCurrency: string }) {
   return inTransaction(pool, (client) => createBookWithClient(client,userId,input));
@@ -14,9 +15,11 @@ export async function createBookWithClient(client: DbClient, userId: string, inp
     );
     const book = result.rows[0];
     await client.query(`INSERT INTO book_members(book_id,user_id,role,status) VALUES($1,$2,'OWNER','ACTIVE')`, [book.id, userId]);
+    await client.query(`SELECT seed_default_account_types($1)`, [book.id]);
+    const equityType = await getSystemAccountType(client, book.id, "SYSTEM_EQUITY");
     await client.query(
-      `INSERT INTO accounts(book_id,name,account_type,normal_balance,currency_code,is_system)
-       VALUES($1,'Opening Equity','SYSTEM_EQUITY','CREDIT',$2,true)`, [book.id, input.baseCurrency],
+      `INSERT INTO accounts(book_id,name,account_type_id,normal_balance,currency_code,is_system)
+       VALUES($1,'Opening Equity',$2,'CREDIT',$3,true)`, [book.id, equityType.id, input.baseCurrency],
     );
     await client.query(`SELECT seed_default_categories($1,$2)`, [book.id, input.baseCurrency]);
     await client.query(`SELECT seed_default_investment_types($1)`, [book.id]);

@@ -70,6 +70,7 @@ function defaultResponse(path: string, options: RequestOptions<unknown>): unknow
     };
   }
   if (path.startsWith("/api/v1/accounts?")) return { items: [] };
+  if (path.startsWith("/api/v1/account-types?")) return { items: [] };
   if (path.startsWith("/api/v1/categories?")) return { items: [] };
   if (path.startsWith("/api/v1/cost-centers?")) return { items: [] };
   if (path.startsWith("/api/v1/transactions?") && options.method !== "POST") {
@@ -112,6 +113,7 @@ function defaultResponse(path: string, options: RequestOptions<unknown>): unknow
       accountBalances: { accounts: [], items: [] },
       categoryDetail: { breakdown: [], transactions: [] },
       liquidity: { openingBalance: "0", items: [], events: [] },
+      investmentValueSeries: [],
       netWorth: {
         cashBalance: "0",
         investmentCost: "0",

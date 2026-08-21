@@ -1,5 +1,6 @@
 import type { DbClient } from "../../infrastructure/database";
 import { AppError } from "../../common/errors";
+import { findSystemAccountId } from "../accounts/system-accounts";
 import type { TransactionMutationInput } from "./transaction.schemas";
 import type { LedgerEntryDraft } from "../ledger/ledger.types";
 
@@ -66,6 +67,6 @@ export async function resolveLedgerAccounts(client:DbClient,input:TransactionMut
   let contactAccountId:string|undefined;
   if(input.contactId){const result=await client.query<{id:string}>(`SELECT a.id FROM contacts c JOIN accounts a ON a.contact_id=c.id WHERE c.id=$1 AND c.book_id=$2 AND c.deleted_at IS NULL AND a.deleted_at IS NULL AND a.is_archived=false`,[input.contactId,input.bookId]);if(!result.rows[0])throw new AppError(422,"CONTACT_ACCOUNT_INVALID","Contact account is unavailable");contactAccountId=result.rows[0].id;}
   let equityAccountId:string|undefined;
-  if(input.type==='OPENING_BALANCE'){const result=await client.query<{id:string}>(`SELECT id FROM accounts WHERE book_id=$1 AND account_type='SYSTEM_EQUITY' AND deleted_at IS NULL LIMIT 1`,[input.bookId]);equityAccountId=result.rows[0]?.id;}
+  if(input.type==='OPENING_BALANCE'){equityAccountId=await findSystemAccountId(client,input.bookId,"SYSTEM_EQUITY");}
   return{categoryAccountId,contactAccountId,equityAccountId};
 }

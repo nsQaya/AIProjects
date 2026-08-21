@@ -17,6 +17,7 @@ const messages: Record<string, string> = {
     "Bakiyesi olan bu hesabın türü borç/varlık yönünü değiştiremez.",
   RECURRENCE_TOO_LONG: "Tek seferde en fazla 240 tekrar oluşturulabilir.",
   CATEGORY_INVALID: "Kategori artık kullanılamıyor; etkin bir kategori seçin.",
+  LEDGER_MAPPING_MISSING: "Gelir/gider işlemleri için bir kategori seçmelisiniz.",
   INVESTMENT_QUANTITY_EXCEEDED: "Satış adedi eldeki birikim adedini aşıyor.",
   INVESTMENT_HISTORY_LOCKED:
     "Satış yapılmış bir yatırımın eski alım lotları değiştirilemez; düzeltme lotu ekleyin.",

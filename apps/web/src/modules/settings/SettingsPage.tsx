@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type {
+  AccountTypeDTO,
   CategoryDTO,
   CostCenterDTO,
   CurrencyRateAtDateDTO,
@@ -14,6 +15,7 @@ import { InlineFeedback } from "../../components/ui";
 import { today } from "../../lib/date";
 import { moneyInCurrency } from "../../lib/format";
 import {
+  AccountTypeDialog,
   CategoryDialog,
   CostCenterDialog,
   InstrumentDialog,
@@ -29,6 +31,7 @@ import type {
 } from "./settings-types";
 
 type SettingsDialogState =
+  | { type: "account-type"; item: AccountTypeDTO | null }
   | { type: "category"; item: CategoryDTO | null }
   | { type: "cost-center"; item: CostCenterDTO | null }
   | { type: "instrument"; item: InvestmentInstrumentDTO | null }
@@ -398,6 +401,88 @@ export function SettingsPage({
         <article className="panel settings-card">
           <header className="panel-head">
             <div>
+              <h2>Hesap türleri</h2>
+              <p>Hesaplar sayfasında seçilebilen türler</p>
+            </div>
+            <button
+              className="secondary-button"
+              id="open-account-type-dialog"
+              type="button"
+              onClick={() => setDialog({ type: "account-type", item: null })}
+            >
+              + Tür
+            </button>
+          </header>
+          <div className="management-list compact-list">
+            {model.accountTypes.map((item) => {
+              const deleteKey = `delete-account-type:${item.id}`;
+              const activateKey = `activate-account-type:${item.id}`;
+              return (
+                <div key={item.id}>
+                  <span>
+                    <b>{item.name}</b>
+                    <small>{item.isActive ? "Aktif" : "Pasif"}</small>
+                  </span>
+                  <span className="row-actions">
+                    <button
+                      type="button"
+                      data-edit-account-type={item.id}
+                      disabled={pendingAction !== null}
+                      onClick={() => setDialog({ type: "account-type", item })}
+                    >
+                      Düzenle
+                    </button>
+                    {item.isActive ? (
+                      <button
+                        type="button"
+                        className="danger-link"
+                        data-delete-account-type={item.id}
+                        disabled={pendingAction !== null}
+                        onClick={() =>
+                          runConfirmedAction(
+                            deleteKey,
+                            item.isSystem
+                              ? `“${item.name}” pasife alınsın mı? Sistem türleri silinemez.`
+                              : `“${item.name}” silinsin mi? Kullanılıyorsa pasife alınacaktır.`,
+                            () => actions.onDeleteAccountType(versioned(item)),
+                          )
+                        }
+                      >
+                        {pendingAction === deleteKey
+                          ? "İşleniyor…"
+                          : item.isSystem
+                            ? "Pasif al"
+                            : "Sil / pasif al"}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        data-activate-account-type={item.id}
+                        disabled={pendingAction !== null}
+                        onClick={() =>
+                          void runAction(activateKey, () =>
+                            actions.onActivateAccountType(versioned(item)),
+                          )
+                        }
+                      >
+                        {pendingAction === activateKey
+                          ? "Etkinleştiriliyor…"
+                          : "Etkinleştir"}
+                      </button>
+                    )}
+                  </span>
+                </div>
+              );
+            })}
+            {model.accountTypes.length === 0 ? (
+              <div className="empty-state">Henüz hesap türü tanımlanmadı.</div>
+            ) : null}
+          </div>
+        </article>
+
+        <article className="panel settings-card">
+          <header className="panel-head">
+            <div>
               <h2>Birikim türleri</h2>
               <p>Hisse, fon, ETF ve özel türler</p>
             </div>
@@ -654,6 +739,14 @@ export function SettingsPage({
         </article>
       </div>
 
+      {dialog?.type === "account-type" ? (
+        <AccountTypeDialog
+          key={`account-type:${dialog.item?.id ?? "new"}`}
+          accountType={dialog.item}
+          onClose={() => setDialog(null)}
+          onSave={actions.onSaveAccountType}
+        />
+      ) : null}
       {dialog?.type === "category" ? (
         <CategoryDialog
           key={`category:${dialog.item?.id ?? "new"}`}

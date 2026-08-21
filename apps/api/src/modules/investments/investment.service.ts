@@ -1,6 +1,7 @@
 import { AppError } from "../../common/errors";
 import { inTransaction, type DbClient } from "../../infrastructure/database";
 import { createTransactionWithClient,reverseWithClient } from "../transactions/transaction.service";
+import { getSystemAccountId } from "../accounts/system-accounts";
 import type {
   CreateAssetTypeInput,CreateInstrumentInput,CreateLotInput,CreatePriceInput,CreateSaleInput,
   UpdateAssetTypeInput,UpdateInstrumentInput,UpdateLotInput,UpdateSaleInput,
@@ -279,15 +280,11 @@ export async function createSale(client:DbClient,userId:string,input:CreateSaleI
       [input.instrumentId,input.bookId],
     );
     const values=await saleValues(transaction,input.bookId,input.instrumentId,input.quantity,input.unitPrice);
-    const equity=await transaction.query<{id:string}>(
-      `SELECT id FROM accounts WHERE book_id=$1 AND account_type='SYSTEM_EQUITY' AND deleted_at IS NULL LIMIT 1`,
-      [input.bookId],
-    );
-    if(!equity.rows[0])throw new AppError(500,"EQUITY_ACCOUNT_MISSING","Investment sale offset account is missing");
+    const equityAccountId=await getSystemAccountId(transaction,input.bookId,"SYSTEM_EQUITY");
     const posted=await createTransactionWithClient(transaction,userId,{
       bookId:input.bookId,type:"ADJUSTMENT",title:`Birikim satışı: ${instrument.rows[0]!.name}`,
       amount:values.proceeds,currencyCode:instrument.rows[0]!.currency_code,
-      accountId:input.destinationAccountId,targetAccountId:equity.rows[0].id,
+      accountId:input.destinationAccountId,targetAccountId:equityAccountId,
       transactionDate:input.soldAt,clientOperationId:input.clientOperationId,
       description:input.notes??"Birikim satış bedeli",
     });
@@ -316,15 +313,12 @@ export async function updateSale(client:DbClient,userId:string,id:string,input:U
       `SELECT name,currency_code FROM investment_instruments WHERE id=$1 AND book_id=$2 AND deleted_at IS NULL`,[input.instrumentId,current.book_id],
     );
     const values=await saleValues(transaction,current.book_id,input.instrumentId,input.quantity,input.unitPrice,id);
-    const equity=await transaction.query<{id:string}>(
-      `SELECT id FROM accounts WHERE book_id=$1 AND account_type='SYSTEM_EQUITY' AND deleted_at IS NULL LIMIT 1`,[current.book_id],
-    );
-    if(!equity.rows[0])throw new AppError(500,"EQUITY_ACCOUNT_MISSING","Investment sale offset account is missing");
+    const equityAccountId=await getSystemAccountId(transaction,current.book_id,"SYSTEM_EQUITY");
     await reverseWithClient(transaction,userId,current.book_id,current.transaction_id,input.reversalClientOperationId,"Birikim satışı düzeltildi",false);
     const posted=await createTransactionWithClient(transaction,userId,{
       bookId:current.book_id,type:"ADJUSTMENT",title:`Birikim satışı: ${instrument.rows[0]!.name}`,
       amount:values.proceeds,currencyCode:instrument.rows[0]!.currency_code,
-      accountId:input.destinationAccountId,targetAccountId:equity.rows[0].id,
+      accountId:input.destinationAccountId,targetAccountId:equityAccountId,
       transactionDate:input.soldAt,clientOperationId:input.clientOperationId,
       description:input.notes??"Birikim satış bedeli",
     });

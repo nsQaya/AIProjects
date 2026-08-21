@@ -10,36 +10,38 @@ const BANK_ID = "account-1";
 const CASH_ID = "account-2";
 const CARD_ID = "account-3";
 
-function account(id: string, name: string, accountType: AccountView["accountType"]): AccountView {
+function account(id: string, name: string, isCreditCard: boolean): AccountView {
   return {
     id,
     bookId: BOOK_ID,
     contactId: null,
     name,
-    accountType,
-    normalBalance: accountType === "CREDIT_CARD" ? "CREDIT" : "DEBIT",
+    accountTypeId: isCreditCard ? "type-credit-card" : "type-cash",
+    accountTypeName: name,
+    accountTypeIcon: null,
+    normalBalance: isCreditCard ? "CREDIT" : "DEBIT",
     currencyCode: "TRY",
-    allowNegativeBalance: accountType === "CREDIT_CARD",
-    creditLimit: accountType === "CREDIT_CARD" ? "10000.00" : null,
+    allowNegativeBalance: isCreditCard,
+    creditLimit: isCreditCard ? "10000.00" : null,
     isArchived: false,
     sortOrder: 0,
     version: 1,
     balance: "0.00",
     displayBalance: "0.00",
-    availableCredit: accountType === "CREDIT_CARD" ? "10000.00" : null,
+    availableCredit: isCreditCard ? "10000.00" : null,
     ui: {
       balance: 0,
       displayBalance: 0,
-      creditLimit: accountType === "CREDIT_CARD" ? 10000 : null,
-      availableCredit: accountType === "CREDIT_CARD" ? 10000 : null,
+      creditLimit: isCreditCard ? 10000 : null,
+      availableCredit: isCreditCard ? 10000 : null,
     },
   };
 }
 
 const accounts: readonly AccountView[] = [
-  account(BANK_ID, "Banka", "BANK"),
-  account(CASH_ID, "Nakit", "CASH"),
-  account(CARD_ID, "Kredi kartı", "CREDIT_CARD"),
+  account(BANK_ID, "Banka", false),
+  account(CASH_ID, "Nakit", false),
+  account(CARD_ID, "Kredi kartı", true),
 ];
 
 interface ScheduledItemInput {

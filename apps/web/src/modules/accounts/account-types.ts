@@ -1,4 +1,4 @@
-import type { AccountType, MoneyString, UUID, Version } from "@defterx/contracts";
+import type { MoneyString, UUID, Version } from "@defterx/contracts";
 
 /**
  * The account page only needs this projection of the server DTO. Keeping the
@@ -8,7 +8,9 @@ import type { AccountType, MoneyString, UUID, Version } from "@defterx/contracts
 export interface AccountViewModel {
   readonly id: UUID;
   readonly name: string;
-  readonly accountType: AccountType;
+  readonly accountTypeId: UUID;
+  readonly accountTypeName: string;
+  readonly accountTypeIcon: string | null;
   readonly displayBalance: MoneyString;
   readonly allowNegativeBalance: boolean;
   readonly creditLimit: MoneyString | null;
@@ -19,7 +21,7 @@ export interface AccountViewModel {
 
 export interface AccountFormValues {
   readonly name: string;
-  readonly accountType: AccountType;
+  readonly accountTypeId: UUID;
   readonly allowNegativeBalance: boolean;
   readonly creditLimit: MoneyString | null;
 }

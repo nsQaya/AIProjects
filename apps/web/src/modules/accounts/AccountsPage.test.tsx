@@ -1,12 +1,45 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { AccountTypeDTO } from "@defterx/contracts";
 
 import { AccountsPage, type AccountViewModel } from ".";
+
+const bankType: AccountTypeDTO = {
+  id: "type-bank",
+  bookId: "book-1",
+  name: "Banka",
+  icon: null,
+  normalBalance: "DEBIT",
+  defaultAllowNegativeBalance: false,
+  purpose: null,
+  isSystem: true,
+  isActive: true,
+  sortOrder: 20,
+  version: 1,
+};
+
+const creditCardType: AccountTypeDTO = {
+  id: "type-credit-card",
+  bookId: "book-1",
+  name: "Kredi Kartı",
+  icon: null,
+  normalBalance: "CREDIT",
+  defaultAllowNegativeBalance: true,
+  purpose: null,
+  isSystem: true,
+  isActive: true,
+  sortOrder: 30,
+  version: 1,
+};
+
+const accountTypes: readonly AccountTypeDTO[] = [bankType, creditCardType];
 
 const bankAccount: AccountViewModel = {
   id: "account-1",
   name: "Maaş hesabı",
-  accountType: "BANK",
+  accountTypeId: bankType.id,
+  accountTypeName: bankType.name,
+  accountTypeIcon: null,
   displayBalance: "1250.50",
   allowNegativeBalance: false,
   creditLimit: null,
@@ -27,7 +60,7 @@ describe("AccountsPage", () => {
   it("shows opening balance only on create and keeps account type editable", async () => {
     const user = userEvent.setup();
     const actions = callbacks();
-    render(<AccountsPage accounts={[bankAccount]} {...actions} />);
+    render(<AccountsPage accounts={[bankAccount]} accountTypes={accountTypes} {...actions} />);
 
     await user.click(screen.getByRole("button", { name: "+ Hesap ekle" }));
     expect(await screen.findByLabelText("Açılış bakiyesi")).toBeInTheDocument();
@@ -39,21 +72,21 @@ describe("AccountsPage", () => {
 
     const type = within(dialog).getByLabelText("Hesap türü");
     expect(type).toBeEnabled();
-    await user.selectOptions(type, "CREDIT_CARD");
-    expect(type).toHaveValue("CREDIT_CARD");
+    await user.selectOptions(type, creditCardType.id);
+    expect(type).toHaveValue(creditCardType.id);
     expect(within(dialog).getByLabelText("Eksi bakiyeye izin ver")).toBeChecked();
 
     await user.click(within(dialog).getByRole("button", { name: "Kaydet" }));
     expect(actions.onUpdateAccount).toHaveBeenCalledWith(
       bankAccount.id,
-      expect.objectContaining({ accountType: "CREDIT_CARD", version: bankAccount.version }),
+      expect.objectContaining({ accountTypeId: creditCardType.id, version: bankAccount.version }),
     );
   });
 
   it("reveals and submits an optional overdraft limit only when negative balance is allowed", async () => {
     const user = userEvent.setup();
     const actions = callbacks();
-    render(<AccountsPage accounts={[]} {...actions} />);
+    render(<AccountsPage accounts={[]} accountTypes={accountTypes} {...actions} />);
 
     await user.click(screen.getByRole("button", { name: "+ Hesap ekle" }));
     const dialog = await screen.findByRole("dialog", { name: "Hesap ekle" });
@@ -70,7 +103,7 @@ describe("AccountsPage", () => {
 
     expect(actions.onCreateAccount).toHaveBeenCalledWith({
       name: "KMH hesabı",
-      accountType: "BANK",
+      accountTypeId: bankType.id,
       allowNegativeBalance: true,
       creditLimit: "15000.50",
       openingBalance: "0",
@@ -83,7 +116,7 @@ describe("AccountsPage", () => {
   ])("closes a blank required form with %s without submitting it", async (buttonName) => {
     const user = userEvent.setup();
     const actions = callbacks();
-    render(<AccountsPage accounts={[]} {...actions} />);
+    render(<AccountsPage accounts={[]} accountTypes={accountTypes} {...actions} />);
 
     await user.click(screen.getByRole("button", { name: "+ Hesap ekle" }));
     const dialog = await screen.findByRole("dialog", { name: "Hesap ekle" });
@@ -99,7 +132,7 @@ describe("AccountsPage", () => {
     actions.onUpdateAccount.mockRejectedValueOnce(
       new Error("Bakiyesi olan hesabın türü veya limiti değiştirilemedi."),
     );
-    render(<AccountsPage accounts={[bankAccount]} {...actions} />);
+    render(<AccountsPage accounts={[bankAccount]} accountTypes={accountTypes} {...actions} />);
 
     await user.click(screen.getByRole("button", { name: "Düzenle" }));
     const dialog = await screen.findByRole("dialog", { name: "Hesabı düzenle" });
@@ -114,7 +147,7 @@ describe("AccountsPage", () => {
   it("submits values assigned by the Edge smoke flow before requestSubmit", async () => {
     const user = userEvent.setup();
     const actions = callbacks();
-    render(<AccountsPage accounts={[bankAccount]} {...actions} />);
+    render(<AccountsPage accounts={[bankAccount]} accountTypes={accountTypes} {...actions} />);
 
     await user.click(screen.getByRole("button", { name: "Düzenle" }));
     const form = document.querySelector<HTMLFormElement>("#account-form");
@@ -134,7 +167,7 @@ describe("AccountsPage", () => {
     await waitFor(() => {
       expect(actions.onUpdateAccount).toHaveBeenCalledWith(bankAccount.id, {
         name: "Canlı Banka Düzenlendi",
-        accountType: "BANK",
+        accountTypeId: bankType.id,
         allowNegativeBalance: true,
         creditLimit: "500",
         version: bankAccount.version,

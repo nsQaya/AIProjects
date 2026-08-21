@@ -1,4 +1,5 @@
 import type {
+  AccountTypeDTO,
   BalanceReportItemDTO,
   BookListItemDTO,
   CategoryDTO,
@@ -64,6 +65,7 @@ export interface FinanceSnapshot {
   user: AuthUser | null;
   book: BookListItemDTO | null;
   accounts: readonly AccountView[];
+  accountTypes: readonly AccountTypeDTO[];
   categories: readonly (CategoryDTO & { ui: { kind: "income" | "expense" } })[];
   costCenters: readonly CostCenterDTO[];
   currencies: readonly CurrencyDTO[];
@@ -113,6 +115,7 @@ export function createInitialFinanceSnapshot(): FinanceSnapshot {
     user: null,
     book: null,
     accounts: [],
+    accountTypes: [],
     categories: [],
     costCenters: [],
     currencies: [],

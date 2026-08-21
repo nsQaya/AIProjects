@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { CostCenterDTO } from "@defterx/contracts";
+import type { CategoryDTO, CostCenterDTO } from "@defterx/contracts";
 import type { AccountView, TransactionView } from "../../finance/finance-views";
 import { TransactionDialog } from "./TransactionDialog";
 
@@ -9,7 +9,9 @@ const account = {
   bookId: "book-1",
   contactId: null,
   name: "Banka",
-  accountType: "BANK",
+  accountTypeId: "00000000-0000-4000-8000-000000000091",
+  accountTypeName: "Banka",
+  accountTypeIcon: null,
   normalBalance: "DEBIT",
   currencyCode: "TRY",
   allowNegativeBalance: false,
@@ -33,6 +35,19 @@ const costCenter = {
   version: 1,
 } satisfies CostCenterDTO;
 
+const category = {
+  id: "category-1",
+  bookId: "book-1",
+  parentId: null,
+  name: "Ulaşım",
+  categoryType: "EXPENSE",
+  icon: null,
+  sortOrder: 10,
+  isSystem: false,
+  isActive: true,
+  version: 1,
+} satisfies CategoryDTO;
+
 const transaction = {
   id: "transaction-1",
   transactionNo: "1",
@@ -47,8 +62,8 @@ const transaction = {
   dueDate: null,
   status: "POSTED",
   currencyCode: "TRY",
-  categoryId: null,
-  categoryName: null,
+  categoryId: category.id,
+  categoryName: category.name,
   costCenterId: null,
   costCenterName: null,
   contactId: null,
@@ -101,7 +116,7 @@ describe("TransactionDialog", () => {
     render(
       <TransactionDialog
         accounts={[account]}
-        categories={[]}
+        categories={[category]}
         costCenters={[costCenter]}
         onClose={vi.fn()}
         onSave={onSave}
@@ -112,6 +127,7 @@ describe("TransactionDialog", () => {
 
     await user.type(screen.getByLabelText(/Tutar/), "125,50");
     await user.type(screen.getByLabelText("Açıklama"), "Araç yakıtı");
+    await user.selectOptions(screen.getByLabelText("Kategori"), category.id);
     await user.selectOptions(screen.getByLabelText("Masraf merkezi"), costCenter.id);
     await user.click(screen.getByRole("button", { name: "Kaydet" }));
 
@@ -122,6 +138,7 @@ describe("TransactionDialog", () => {
           title: "Araç yakıtı",
           amount: "125.5",
           accountId: account.id,
+          categoryId: category.id,
           costCenterId: costCenter.id,
         }),
         null,
@@ -168,7 +185,7 @@ describe("TransactionDialog", () => {
     render(
       <TransactionDialog
         accounts={[account]}
-        categories={[]}
+        categories={[category]}
         costCenters={[]}
         onClose={vi.fn()}
         onSave={onSave}

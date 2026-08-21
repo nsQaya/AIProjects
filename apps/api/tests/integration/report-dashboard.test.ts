@@ -56,10 +56,11 @@ suite("PostgreSQL dashboard recent-transactions integration",()=>{
       `INSERT INTO book_members(book_id,user_id,role,status) VALUES($1,$2,'OWNER','ACTIVE')`,
       [bookId,userId],
     );
+    await admin.query(`SELECT seed_default_account_types($1)`, [bookId]);
     const accounts = await admin.query<{id:string}>(
-      `INSERT INTO accounts(book_id,name,account_type,normal_balance,currency_code,is_system,allow_negative_balance)
-       VALUES($1,'Cash','CASH','DEBIT','TRY',false,true),
-             ($1,'Expense','SYSTEM_EXPENSE','DEBIT','TRY',true,true)
+      `INSERT INTO accounts(book_id,name,account_type_id,normal_balance,currency_code,is_system,allow_negative_balance)
+       VALUES($1,'Cash',(SELECT id FROM account_types WHERE book_id=$1 AND name='Nakit'),'DEBIT','TRY',false,true),
+             ($1,'Expense',(SELECT id FROM account_types WHERE book_id=$1 AND purpose='SYSTEM_EXPENSE'),'DEBIT','TRY',true,true)
        RETURNING id`,
       [bookId],
     );

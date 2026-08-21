@@ -1,13 +1,13 @@
 import { Money } from "@defterx/shared";
 import { AppError } from "../../common/errors";
 import { inTransaction, type DbClient } from "../../infrastructure/database";
+import { getSystemAccountId } from "./system-accounts";
 import type { CreateAccountInput, UpdateAccountInput } from "./account.schemas";
-
-const liabilityTypes = new Set(["CREDIT_CARD", "SUPPLIER", "PAYABLE"]);
 
 const accountProjection = `
   a.id,a.book_id AS "bookId",a.contact_id AS "contactId",a.name,
-  a.account_type AS "accountType",a.normal_balance AS "normalBalance",
+  a.account_type_id AS "accountTypeId",at.name AS "accountTypeName",at.icon AS "accountTypeIcon",
+  a.normal_balance AS "normalBalance",
   a.currency_code AS "currencyCode",a.allow_negative_balance AS "allowNegativeBalance",
   a.credit_limit::text AS "creditLimit",a.is_archived AS "isArchived",
   a.sort_order AS "sortOrder",a.version,
@@ -18,6 +18,8 @@ const accountProjection = `
     WHEN a.normal_balance='CREDIT' THEN a.credit_limit-balances.balance
     ELSE a.credit_limit+balances.balance
   END)::text AS "availableCredit"`;
+
+const typeJoin = `JOIN account_types at ON at.id=a.account_type_id`;
 
 const balanceJoin = `
   LEFT JOIN LATERAL (
@@ -33,7 +35,7 @@ const balanceJoin = `
 export async function listAccounts(client: DbClient, bookId: string, includeArchived = false) {
   const result = await client.query(
     `SELECT ${accountProjection}
-     FROM accounts a ${balanceJoin}
+     FROM accounts a ${typeJoin} ${balanceJoin}
      WHERE a.book_id=$1 AND a.deleted_at IS NULL AND a.is_system=false
        AND ($2::boolean OR a.is_archived=false)
      ORDER BY a.sort_order,a.name`,
@@ -44,36 +46,43 @@ export async function listAccounts(client: DbClient, bookId: string, includeArch
 
 export async function getAccountBalance(client: DbClient, accountId: string) {
   const result = await client.query(
-    `SELECT ${accountProjection} FROM accounts a ${balanceJoin}
+    `SELECT ${accountProjection} FROM accounts a ${typeJoin} ${balanceJoin}
      WHERE a.id=$1 AND a.deleted_at IS NULL`,
     [accountId],
   );
   return result.rows[0];
 }
 
+async function assertAccountType(client: DbClient, bookId: string, accountTypeId: string) {
+  const result = await client.query<{ normal_balance: "DEBIT" | "CREDIT"; default_allow_negative_balance: boolean }>(
+    `SELECT normal_balance,default_allow_negative_balance FROM account_types
+     WHERE id=$1 AND book_id=$2 AND deleted_at IS NULL AND is_active=true`,
+    [accountTypeId, bookId],
+  );
+  if (!result.rows[0]) throw new AppError(422, "ACCOUNT_TYPE_INVALID", "Account type is unavailable or belongs to another book");
+  return result.rows[0];
+}
+
 export async function createAccount(client: DbClient, userId: string, input: CreateAccountInput) {
   return inTransaction(client, async (transaction) => {
-    const normalBalance = input.normalBalance ?? (liabilityTypes.has(input.accountType) ? "CREDIT" : "DEBIT");
-    const allowNegativeBalance = input.allowNegativeBalance ?? liabilityTypes.has(input.accountType);
+    const type = await assertAccountType(transaction, input.bookId, input.accountTypeId);
+    const normalBalance = input.normalBalance ?? type.normal_balance;
+    const allowNegativeBalance = input.allowNegativeBalance ?? type.default_allow_negative_balance;
     if (!allowNegativeBalance && input.creditLimit != null) {
       throw new AppError(422, "CREDIT_LIMIT_REQUIRES_OVERDRAFT", "Credit limit requires negative balance permission");
     }
 
     const inserted = await transaction.query<{ id: string }>(
       `INSERT INTO accounts(
-         book_id,name,account_type,normal_balance,currency_code,allow_negative_balance,
+         book_id,name,account_type_id,normal_balance,currency_code,allow_negative_balance,
          credit_limit,is_archived,sort_order
        ) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
-      [input.bookId,input.name,input.accountType,normalBalance,input.currencyCode,allowNegativeBalance,input.creditLimit??null,input.isArchived,input.sortOrder],
+      [input.bookId,input.name,input.accountTypeId,normalBalance,input.currencyCode,allowNegativeBalance,input.creditLimit??null,input.isArchived,input.sortOrder],
     );
     const accountId = inserted.rows[0]!.id;
 
     if (Money.parse(input.openingBalance).isPositive()) {
-      const equity = await transaction.query<{ id: string }>(
-        `SELECT id FROM accounts WHERE book_id=$1 AND account_type='SYSTEM_EQUITY' AND deleted_at IS NULL LIMIT 1`,
-        [input.bookId],
-      );
-      if (!equity.rows[0]) throw new AppError(500, "EQUITY_ACCOUNT_MISSING", "Opening equity account is missing");
+      const equityAccountId = await getSystemAccountId(transaction, input.bookId, "SYSTEM_EQUITY");
       const posted = await transaction.query<{ id: string }>(
         `INSERT INTO transactions(
            book_id,transaction_type,account_id,title,transaction_date,status,currency_code,client_operation_id,created_by
@@ -85,7 +94,7 @@ export async function createAccount(client: DbClient, userId: string, input: Cre
       await transaction.query(
         `INSERT INTO transaction_entries(transaction_id,account_id,direction,amount,currency_code,base_amount)
          VALUES($1,$2,$3,$4,$5,$4),($1,$6,$7,$4,$5,$4)`,
-        [posted.rows[0]!.id,accountId,accountDirection,input.openingBalance,input.currencyCode,equity.rows[0].id,equityDirection],
+        [posted.rows[0]!.id,accountId,accountDirection,input.openingBalance,input.currencyCode,equityAccountId,equityDirection],
       );
     }
 
@@ -103,20 +112,21 @@ export async function updateAccount(client: DbClient, userId: string, accountId:
   return inTransaction(client, async (transaction) => {
     const locked = await transaction.query<{
       book_id: string;
-      account_type: string;
+      account_type_id: string;
       normal_balance: "DEBIT" | "CREDIT";
       allow_negative_balance: boolean;
       credit_limit: string | null;
     }>(
-      `SELECT book_id,account_type,normal_balance,allow_negative_balance,credit_limit::text
+      `SELECT book_id,account_type_id,normal_balance,allow_negative_balance,credit_limit::text
        FROM accounts WHERE id=$1 AND deleted_at IS NULL AND is_system=false FOR UPDATE`,
       [accountId],
     );
     const existing = locked.rows[0];
     if (!existing) throw new AppError(404, "ACCOUNT_NOT_FOUND", "Account was not found");
 
-    const accountType = input.accountType ?? existing.account_type;
-    const normalBalance = liabilityTypes.has(accountType) ? "CREDIT" : "DEBIT";
+    const accountTypeId = input.accountTypeId ?? existing.account_type_id;
+    const type = await assertAccountType(transaction, existing.book_id, accountTypeId);
+    const normalBalance = type.normal_balance;
     const allowNegative = input.allowNegativeBalance ?? existing.allow_negative_balance;
     const creditLimit = input.creditLimit === undefined ? existing.credit_limit : input.creditLimit;
     if (!allowNegative && creditLimit != null) {
@@ -139,12 +149,12 @@ export async function updateAccount(client: DbClient, userId: string, accountId:
 
     const result = await transaction.query(
       `UPDATE accounts SET
-         name=COALESCE($2,name),account_type=$3,normal_balance=$4,
+         name=COALESCE($2,name),account_type_id=$3,normal_balance=$4,
          allow_negative_balance=$5,credit_limit=$6,
          is_archived=COALESCE($7,is_archived),sort_order=COALESCE($8,sort_order),
          updated_at=now(),version=version+1
        WHERE id=$1 AND version=$9 RETURNING id`,
-      [accountId,input.name??null,accountType,normalBalance,allowNegative,creditLimit,input.isArchived??null,input.sortOrder??null,input.version],
+      [accountId,input.name??null,accountTypeId,normalBalance,allowNegative,creditLimit,input.isArchived??null,input.sortOrder??null,input.version],
     );
     if (!result.rows[0]) throw new AppError(409, "VERSION_CONFLICT", "Account changed on another device");
     const account = await getAccountBalance(transaction, accountId);

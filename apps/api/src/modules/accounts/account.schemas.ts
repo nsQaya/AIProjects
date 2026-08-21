@@ -1,15 +1,10 @@
 import { z } from "zod";
 import { currency, nonnegativeMoney, uuid } from "../../common/schemas";
 
-const accountType = z.enum([
-  "CASH", "BANK", "CREDIT_CARD", "CUSTOMER", "SUPPLIER", "RECEIVABLE",
-  "PAYABLE", "SAVINGS", "BUDGET", "PERSONNEL", "OTHER"
-]);
-
 export const createAccountSchema = z.object({
   bookId: uuid,
   name: z.string().trim().min(1).max(120),
-  accountType,
+  accountTypeId: uuid,
   normalBalance: z.enum(["DEBIT", "CREDIT"]).optional(),
   currencyCode: currency,
   allowNegativeBalance: z.boolean().optional(),
@@ -21,7 +16,7 @@ export const createAccountSchema = z.object({
 
 export const updateAccountSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
-  accountType: accountType.optional(),
+  accountTypeId: uuid.optional(),
   allowNegativeBalance: z.boolean().optional(),
   creditLimit: nonnegativeMoney.nullable().optional(),
   isArchived: z.boolean().optional(),

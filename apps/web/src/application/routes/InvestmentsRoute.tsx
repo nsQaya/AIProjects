@@ -1,8 +1,42 @@
+import { useEffect, useState } from "react";
+import type { InvestmentValueSeriesItemDTO } from "@defterx/contracts";
+
+import { cashFlowWindow, type CashFlowRange } from "../../finance";
 import { SavingsPage } from "../../modules/investments";
 import { useFinance } from "../../providers/FinanceProvider";
 
 export function InvestmentsRoute() {
   const { mutate, mutationBusy, service, snapshot } = useFinance();
+  const [valueHistoryRange, setValueHistoryRange] = useState<CashFlowRange>("1Y");
+  const [valueHistory, setValueHistory] = useState<readonly InvestmentValueSeriesItemDTO[]>([]);
+  const [valueHistoryBusy, setValueHistoryBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const window = cashFlowWindow(valueHistoryRange, new Date());
+    Promise.resolve()
+      .then(() => {
+        if (cancelled) return undefined;
+        setValueHistoryBusy(true);
+        return service.loadInvestmentValueSeries({
+          from: window.from,
+          to: window.to,
+          granularity: window.granularity,
+        });
+      })
+      .then((series) => {
+        if (!cancelled && series) setValueHistory(series);
+      })
+      .catch(() => {
+        if (!cancelled) setValueHistory([]);
+      })
+      .finally(() => {
+        if (!cancelled) setValueHistoryBusy(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [service, valueHistoryRange]);
 
   return (
     <SavingsPage
@@ -12,6 +46,10 @@ export function InvestmentsRoute() {
       portfolio={snapshot.portfolio}
       sales={snapshot.sales}
       busy={mutationBusy}
+      valueHistory={valueHistory}
+      valueHistoryBusy={valueHistoryBusy}
+      valueHistoryRange={valueHistoryRange}
+      onValueHistoryRangeChange={setValueHistoryRange}
       onCreateLot={(values) =>
         mutate(() => service.createLot(values), "Birikim alımı eklendi.")
       }

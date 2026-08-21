@@ -36,9 +36,13 @@ const book = (await request("/api/v1/books", {
   method: "POST", headers: authorization,
   body: JSON.stringify({ name: `Smoke Test ${runId}`, bookType: "PERSONAL", baseCurrency: "TRY" })
 })).payload;
+const accountTypes = (await request(`/api/v1/account-types?bookId=${book.id}`, { headers: authorization })).payload;
+const bankType = accountTypes.items.find((item) => item.name === "Banka");
+const cashType = accountTypes.items.find((item) => item.name === "Nakit");
+if (!bankType || !cashType) throw new Error("Seeded default account types were not found");
 const account = (await request("/api/v1/accounts", {
   method: "POST", headers: authorization,
-  body: JSON.stringify({ bookId: book.id, name: "Smoke Bank", accountType: "BANK", normalBalance: "DEBIT", currencyCode: "TRY", openingBalance: "1000" })
+  body: JSON.stringify({ bookId: book.id, name: "Smoke Bank", accountTypeId: bankType.id, normalBalance: "DEBIT", currencyCode: "TRY", openingBalance: "1000" })
 })).payload;
 if (account.balance !== "1000.000000") throw new Error(`Opening balance was not posted: ${account.balance}`);
 const immediateAccounts = (await request(`/api/v1/accounts?bookId=${book.id}&includeArchived=true&_=${Date.now()}`, { headers: authorization })).payload;
@@ -95,13 +99,13 @@ if (!cashflow.items.some((item) => item.month === "2026-08" && Number(item.expen
 
 const restrictedAccount = (await request("/api/v1/accounts", {
   method:"POST",headers:authorization,
-  body:JSON.stringify({bookId:book.id,name:"Restricted Cash",accountType:"CASH",currencyCode:"TRY",openingBalance:"0"})
+  body:JSON.stringify({bookId:book.id,name:"Restricted Cash",accountTypeId:cashType.id,currencyCode:"TRY",openingBalance:"0"})
 })).payload;
 const changedAccountType=(await request(`/api/v1/accounts/${restrictedAccount.id}`,{
   method:"PATCH",headers:authorization,
-  body:JSON.stringify({accountType:"BANK",version:restrictedAccount.version})
+  body:JSON.stringify({accountTypeId:bankType.id,version:restrictedAccount.version})
 })).payload;
-if(changedAccountType.accountType!=="BANK")throw new Error("Editable account type was not persisted");
+if(changedAccountType.accountTypeId!==bankType.id)throw new Error("Editable account type was not persisted");
 async function expectPostingError(accountId,amount,expectedCode){
   const response=await fetch(`${apiBaseUrl}/api/v1/transactions`,{method:"POST",headers:{Origin:webOrigin,"Content-Type":"application/json",Authorization:authorization.Authorization,"Idempotency-Key":randomUUID()},body:JSON.stringify({bookId:book.id,type:"EXPENSE",title:"Limit rejection probe",amount,currencyCode:"TRY",accountId,categoryId:category.id,transactionDate:"2026-08-07T12:00:00.000Z",clientOperationId:randomUUID()})});
   const payload=await response.json();

@@ -8,25 +8,75 @@ import type {
   Version,
 } from "./common.js";
 
-export type AccountType =
-  | "CASH"
-  | "BANK"
-  | "CREDIT_CARD"
+export type AccountTypePurpose =
+  | "SYSTEM_INCOME"
+  | "SYSTEM_EXPENSE"
+  | "SYSTEM_EQUITY"
   | "CUSTOMER"
   | "SUPPLIER"
-  | "RECEIVABLE"
-  | "PAYABLE"
-  | "SAVINGS"
-  | "BUDGET"
-  | "PERSONNEL"
   | "OTHER";
+
+export interface AccountTypeDTO {
+  id: UUID;
+  bookId: UUID;
+  name: string;
+  icon: string | null;
+  normalBalance: Direction;
+  defaultAllowNegativeBalance: boolean;
+  /** Stable system role this type carries (e.g. the book's SYSTEM_EQUITY account), null for ordinary/custom types. Never user-settable. */
+  purpose: AccountTypePurpose | null;
+  /** Seeded default type; cannot be hard-deleted, only deactivated. */
+  isSystem: boolean;
+  isActive: boolean;
+  sortOrder: number;
+  version: Version;
+}
+
+export type AccountTypeListResponse = ItemListResponse<AccountTypeDTO>;
+
+export interface ListAccountTypesQuery {
+  bookId: UUID;
+  includeInactive?: boolean;
+}
+
+export interface CreateAccountTypeRequest {
+  bookId: UUID;
+  name: string;
+  icon?: string | null;
+  normalBalance: Direction;
+  defaultAllowNegativeBalance?: boolean;
+  sortOrder?: number;
+}
+
+export interface UpdateAccountTypeRequest {
+  name?: string;
+  icon?: string | null;
+  normalBalance?: Direction;
+  defaultAllowNegativeBalance?: boolean;
+  sortOrder?: number;
+  isActive?: boolean;
+  version: Version;
+}
+
+export type CreateAccountTypeResponse = AccountTypeDTO;
+export type UpdateAccountTypeResponse = AccountTypeDTO;
+
+export interface DeactivatedAccountTypeResponse {
+  id: UUID;
+  isActive: false;
+  version: Version;
+}
+
+export type DeleteAccountTypeResponse = DeletedEntityResponse | DeactivatedAccountTypeResponse;
 
 export interface AccountDTO {
   id: UUID;
   bookId: UUID;
   contactId: UUID | null;
   name: string;
-  accountType: AccountType;
+  accountTypeId: UUID;
+  accountTypeName: string;
+  accountTypeIcon: string | null;
   normalBalance: Direction;
   currencyCode: CurrencyCode;
   allowNegativeBalance: boolean;
@@ -52,7 +102,7 @@ export interface ListAccountsQuery {
 export interface CreateAccountRequest {
   bookId: UUID;
   name: string;
-  accountType: AccountType;
+  accountTypeId: UUID;
   normalBalance?: Direction;
   currencyCode: CurrencyCode;
   allowNegativeBalance?: boolean;
@@ -64,7 +114,7 @@ export interface CreateAccountRequest {
 
 export interface UpdateAccountRequest {
   name?: string;
-  accountType?: AccountType;
+  accountTypeId?: UUID;
   allowNegativeBalance?: boolean;
   creditLimit?: MoneyString | null;
   isArchived?: boolean;

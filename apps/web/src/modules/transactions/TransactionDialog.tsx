@@ -96,6 +96,10 @@ export function TransactionDialog({
       setFeedback("Kaynak ve hedef hesap farklı olmalı.");
       return;
     }
+    if (submittedKind !== "transfer" && !submittedCategoryId) {
+      setFeedback("Kategori seçin.");
+      return;
+    }
 
     setSubmitting(true);
     setFeedback("");
@@ -198,7 +202,7 @@ export function TransactionDialog({
           </label>
           <label id="category-field" hidden={kind === "transfer"}>
             <span>Kategori</span>
-            <select name="categoryId" value={categoryId} onChange={(event) => setCategoryId(event.target.value)} disabled={kind === "transfer"}>
+            <select name="categoryId" value={categoryId} onChange={(event) => setCategoryId(event.target.value)} disabled={kind === "transfer"} required={kind !== "transfer"}>
               <option value="">Kategori seçin</option>
               {availableCategories
                 .filter((category) => category.categoryType === kind.toUpperCase())

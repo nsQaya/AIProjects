@@ -1,9 +1,13 @@
 import { useState, type CSSProperties } from "react";
+import type { InvestmentValueSeriesItemDTO } from "@defterx/contracts";
 
+import { ReportChart } from "../../components/charts";
 import { Button, InlineFeedback } from "../../components/ui";
+import type { CashFlowRange } from "../../finance";
 import { errorMessage } from "../../lib/error-message";
 import { dateText, money, moneyInCurrency, toNumber } from "../../lib/format";
 import { isPositiveDecimal } from "./decimal";
+import { investmentValueHistoryOption } from "./investment-chart-options";
 import { LotDialog, SaleDialog } from "./InvestmentDialogs";
 import type {
   InvestmentLotViewModel,
@@ -16,10 +20,26 @@ type InvestmentDialogState =
   | { readonly type: "lot"; readonly item: InvestmentLotViewModel | null }
   | { readonly type: "sale"; readonly item: InvestmentSaleViewModel | null };
 
+const valueHistoryRangeLabels: Readonly<Record<CashFlowRange, string>> = {
+  "1M": "1 ay",
+  "3M": "3 ay",
+  "6M": "6 ay",
+  YTD: "Yıl başı",
+  "1Y": "1 yıl",
+  "5Y": "5 yıl",
+  "10Y": "10 yıl",
+};
+
+const valueHistoryRangeOrder = Object.keys(valueHistoryRangeLabels) as CashFlowRange[];
+
 export interface InvestmentsPageProps extends InvestmentPageCallbacks, InvestmentsPageModel {
   busy?: boolean;
   confirmDeleteLot?: (lot: InvestmentLotViewModel) => boolean | Promise<boolean>;
   confirmDeleteSale?: (sale: InvestmentSaleViewModel, message: string) => boolean | Promise<boolean>;
+  onValueHistoryRangeChange?: (range: CashFlowRange) => void;
+  valueHistory?: readonly InvestmentValueSeriesItemDTO[];
+  valueHistoryBusy?: boolean;
+  valueHistoryRange?: CashFlowRange;
 }
 
 export function InvestmentsPage({
@@ -35,8 +55,12 @@ export function InvestmentsPage({
   onDeleteSale,
   onUpdateLot,
   onUpdateSale,
+  onValueHistoryRangeChange,
   portfolio,
   sales,
+  valueHistory = [],
+  valueHistoryBusy = false,
+  valueHistoryRange = "1Y",
 }: InvestmentsPageProps) {
   const [dialog, setDialog] = useState<InvestmentDialogState | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
@@ -176,6 +200,40 @@ export function InvestmentsPage({
           })
         )}
       </div>
+
+      <article className="panel report-main-panel">
+        <header className="panel-head">
+          <div>
+            <h2>Portföy Değeri Gelişimi</h2>
+            <p>Seçilen dönemdeki yatırım pozisyonlarının dönem sonu toplam değeri</p>
+          </div>
+          <div className="range-switch" role="group" aria-label="Tarih aralığı">
+            {valueHistoryRangeOrder.map((option) => (
+              <button
+                key={option}
+                type="button"
+                data-range-value={option}
+                className={valueHistoryRange === option ? "active" : ""}
+                aria-pressed={valueHistoryRange === option}
+                disabled={busy || valueHistoryBusy}
+                onClick={() => onValueHistoryRangeChange?.(option)}
+              >
+                {valueHistoryRangeLabels[option]}
+              </button>
+            ))}
+          </div>
+        </header>
+        {valueHistory.length === 0 ? (
+          <div className="empty-state">Seçilen dönemde yatırım değeri verisi yok.</div>
+        ) : (
+          <ReportChart
+            busy={busy || valueHistoryBusy}
+            height={330}
+            label="Portföy değeri gelişimi"
+            option={investmentValueHistoryOption(valueHistory)}
+          />
+        )}
+      </article>
 
       <article className="panel transaction-panel">
         <header className="panel-head">

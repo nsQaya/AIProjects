@@ -70,6 +70,36 @@ export function SettingsRoute() {
         "Masraf merkezi etkinleştirildi.",
       );
     },
+    onSaveAccountType: async (input) => {
+      if (input.mode === "create") {
+        await mutate(
+          () => service.createAccountType({
+            name: input.name,
+            normalBalance: input.normalBalance,
+            defaultAllowNegativeBalance: input.defaultAllowNegativeBalance,
+            sortOrder: input.sortOrder,
+          }),
+          "Hesap türü eklendi.",
+        );
+      } else {
+        await mutate(
+          () => service.updateAccountType(input.id, {
+            name: input.name,
+            normalBalance: input.normalBalance,
+            defaultAllowNegativeBalance: input.defaultAllowNegativeBalance,
+            sortOrder: input.sortOrder,
+            version: input.version,
+          }),
+          "Hesap türü güncellendi.",
+        );
+      }
+    },
+    onDeleteAccountType: async ({ id, version }) => {
+      await mutate(() => service.deleteAccountType(id, version), "Hesap türü silindi veya pasife alındı.");
+    },
+    onActivateAccountType: async ({ id, version }) => {
+      await mutate(() => service.updateAccountType(id, { isActive: true, version }), "Hesap türü etkinleştirildi.");
+    },
     onSaveInvestmentType: async (input) => {
       if (input.mode === "create") {
         await mutate(
@@ -161,6 +191,7 @@ export function SettingsRoute() {
         apiBaseUrl: Configuration.apiBaseUrl,
         apiStatus: { online: apiStatus?.online ?? false, reason: apiStatus?.reason },
         book: snapshot.book,
+        accountTypes: snapshot.accountTypes,
         categories: snapshot.categories,
         costCenters: snapshot.costCenters,
         currencies: snapshot.currencies,

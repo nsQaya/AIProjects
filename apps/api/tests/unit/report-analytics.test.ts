@@ -61,6 +61,6 @@ describe("report analytics", () => {
       [ACCOUNT_ID],
       false,
     ]);
-    expect(calls.map((values) => values.length)).toEqual([1, 8, 8, 5, 5, 8, 5, 8, 5, 5]);
+    expect(calls.map((values) => values.length)).toEqual([1, 8, 8, 5, 5, 8, 5, 5, 8, 5]);
   });
 });

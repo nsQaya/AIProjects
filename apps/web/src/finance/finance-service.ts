@@ -4,6 +4,8 @@ import type {
   CorrectTransactionResponse,
   CreateAccountRequest,
   CreateAccountResponse,
+  CreateAccountTypeRequest,
+  CreateAccountTypeResponse,
   CreateCategoryRequest,
   CreateCategoryResponse,
   CreateCostCenterRequest,
@@ -24,6 +26,7 @@ import type {
   CurrencyRateSyncRunDTO,
   CurrencyRatesAtDateResponse,
   DeleteAccountResponse,
+  DeleteAccountTypeResponse,
   DeleteCategoryResponse,
   DeleteCostCenterResponse,
   DeleteInvestmentAssetTypeResponse,
@@ -49,6 +52,8 @@ import type {
   UUID,
   UpdateAccountRequest,
   UpdateAccountResponse,
+  UpdateAccountTypeRequest,
+  UpdateAccountTypeResponse,
   UpdateCategoryRequest,
   UpdateCategoryResponse,
   UpdateCostCenterRequest,
@@ -103,6 +108,8 @@ import {
 import {
   accountListSchema,
   accountSchema,
+  accountTypeListSchema,
+  accountTypeSchema,
   bookListSchema,
   categoryListSchema,
   categorySchema,
@@ -112,6 +119,7 @@ import {
   createScheduledTransactionResponseSchema,
   createdBookSchema,
   deleteAccountResponseSchema,
+  deleteAccountTypeResponseSchema,
   deleteCategoryResponseSchema,
   deleteCostCenterResponseSchema,
   deleteScheduledTransactionResponseSchema,
@@ -183,6 +191,8 @@ export type CreateFinanceAccountInput = Omit<
   CreateAccountRequest,
   "bookId" | "currencyCode"
 > & { currencyCode?: string };
+
+export type CreateFinanceAccountTypeInput = Omit<CreateAccountTypeRequest, "bookId">;
 
 export type CreateFinanceCategoryInput = Omit<
   CreateCategoryRequest,
@@ -369,6 +379,7 @@ export class FinanceService {
     try {
       const [
         accountsResponse,
+        accountTypesResponse,
         categoriesResponse,
         costCentersResponse,
         currenciesResponse,
@@ -378,6 +389,9 @@ export class FinanceService {
         await Promise.all([
           this.#api.request(`/api/v1/accounts?${baseQuery}&includeArchived=true`, {
             schema: accountListSchema,
+          }),
+          this.#api.request(`/api/v1/account-types?${baseQuery}&includeInactive=true`, {
+            schema: accountTypeListSchema,
           }),
           this.#api.request(`/api/v1/categories?${baseQuery}&includeInactive=true`, {
             schema: categoryListSchema,
@@ -472,6 +486,7 @@ export class FinanceService {
         revision: state.revision + 1,
         lastUpdatedAt: this.#now().toISOString(),
         accounts,
+        accountTypes: accountTypesResponse.items,
         categories,
         costCenters,
         currencies,
@@ -659,6 +674,27 @@ export class FinanceService {
     return response;
   }
 
+  /**
+   * Stateless variant of loadReportAnalytics: fetches the same analytics
+   * payload but never commits reportRange/reportAnalytics, so callers (like
+   * the Investments page's own value-history chart) can pick an independent
+   * date range and granularity without clobbering the Reports page's filter.
+   */
+  async loadInvestmentValueSeries(
+    range: ReportRange = {},
+  ): Promise<ReportAnalyticsResponse["investmentValueSeries"]> {
+    const stableRange: ReportRange = {
+      ...range,
+      accountIds: range.accountIds ? [...range.accountIds] : undefined,
+      granularity: range.granularity ?? "month",
+    };
+    const response: ReportAnalyticsResponse = await this.#api.request(
+      `/api/v1/reports/analytics?${this.#reportQuery(stableRange)}`,
+      { schema: reportAnalyticsSchema },
+    );
+    return response.investmentValueSeries;
+  }
+
   async loadBalanceReport(range: ReportRange = {}): Promise<BalanceReportResponse> {
     const sequence = ++this.#balanceReportSequence;
     const response: BalanceReportResponse = await this.#api.request(
@@ -751,6 +787,34 @@ export class FinanceService {
     return this.#api.request(`/api/v1/accounts/${id}?${buildQuery({ version })}`, {
       method: "DELETE",
       schema: deleteAccountResponseSchema,
+    });
+  }
+
+  createAccountType(
+    input: CreateFinanceAccountTypeInput,
+  ): Promise<CreateAccountTypeResponse> {
+    return this.#api.request("/api/v1/account-types", {
+      method: "POST",
+      body: { bookId: this.bookId(), ...input },
+      schema: accountTypeSchema,
+    });
+  }
+
+  updateAccountType(
+    id: UUID,
+    input: UpdateAccountTypeRequest,
+  ): Promise<UpdateAccountTypeResponse> {
+    return this.#api.request(`/api/v1/account-types/${id}`, {
+      method: "PATCH",
+      body: input,
+      schema: accountTypeSchema,
+    });
+  }
+
+  deleteAccountType(id: UUID, version: number): Promise<DeleteAccountTypeResponse> {
+    return this.#api.request(`/api/v1/account-types/${id}?${buildQuery({ version })}`, {
+      method: "DELETE",
+      schema: deleteAccountTypeResponseSchema,
     });
   }
 

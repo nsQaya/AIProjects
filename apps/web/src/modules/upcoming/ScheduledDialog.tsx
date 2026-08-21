@@ -10,7 +10,7 @@ import {
 } from "../../components/ui";
 import { isoAtLocalNoon, today } from "../../lib/date";
 import { errorMessage } from "../../lib/error-message";
-import { decimalString } from "../../lib/format";
+import { decimalString, editableAmount } from "../../lib/format";
 import type { ScheduledDialogProps, ScheduledFormKind, ScheduledRepeat } from "./scheduled-types";
 
 function formString(values: FormData, key: string): string {
@@ -25,7 +25,7 @@ export function ScheduledDialog({ accounts, categories, costCenters, item, onClo
   );
   const [date, setDate] = useState(initialDate);
   const [title, setTitle] = useState(() => item?.title ?? "");
-  const [amount, setAmount] = useState(() => item?.amount ?? "");
+  const [amount, setAmount] = useState(() => editableAmount(item?.amount ?? "") ?? "");
   const [accountId, setAccountId] = useState(
     () => item?.accountId ?? accounts.find((account) => !account.isArchived)?.id ?? "",
   );

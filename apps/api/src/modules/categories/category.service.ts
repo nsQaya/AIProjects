@@ -1,5 +1,6 @@
 import { AppError } from "../../common/errors";
 import { inTransaction, type DbClient } from "../../infrastructure/database";
+import { getSystemAccountType } from "../accounts/system-accounts";
 import type { CreateCategoryInput, UpdateCategoryInput } from "./category.schemas";
 
 const projection = `id,book_id AS "bookId",parent_id AS "parentId",name,
@@ -19,10 +20,11 @@ export async function listCategories(client: DbClient, bookId: string, includeIn
 export async function createCategory(client: DbClient, userId: string, input: CreateCategoryInput) {
   return inTransaction(client, async (transaction) => {
     if (input.parentId) await assertParent(transaction, input.bookId, input.categoryType, input.parentId);
+    const type = await getSystemAccountType(transaction, input.bookId, input.categoryType==="INCOME"?"SYSTEM_INCOME":"SYSTEM_EXPENSE");
     const account = await transaction.query<{ id: string }>(
-      `INSERT INTO accounts(book_id,name,account_type,normal_balance,currency_code,is_system)
+      `INSERT INTO accounts(book_id,name,account_type_id,normal_balance,currency_code,is_system)
        VALUES($1,$2,$3,$4,$5,true) RETURNING id`,
-      [input.bookId,`Category: ${input.name}`,input.categoryType==="INCOME"?"SYSTEM_INCOME":"SYSTEM_EXPENSE",input.categoryType==="INCOME"?"CREDIT":"DEBIT",input.currencyCode],
+      [input.bookId,`Category: ${input.name}`,type.id,type.normal_balance,input.currencyCode],
     );
     const result = await transaction.query(
       `INSERT INTO categories(book_id,parent_id,name,category_type,system_account_id,icon,sort_order)
