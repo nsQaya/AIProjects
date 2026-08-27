@@ -6,7 +6,7 @@ import {
   fetchYahooSplits,
   type MarketCatalogItem,
 } from "./market-data.provider";
-import { fetchFintablesFundPrices } from "../funds/fund.provider";
+import { fetchTefasFundPrices } from "../funds/fund.provider";
 
 const catalogBatchSize = 400;
 const priceBatchSize = 20;
@@ -301,7 +301,7 @@ export async function processPriceBatch(
 
 async function insertFundPrices(client: DbClient, items: readonly PriceJobItem[], fetcher: typeof fetch) {
   const bySymbol = new Map(items.map((item) => [item.symbol.trim().toUpperCase(),item]));
-  const result = await fetchFintablesFundPrices(items.map((item) => item.symbol),fetcher);
+  const result = await fetchTefasFundPrices(items.map((item) => item.symbol),fetcher);
   if (result.points.length > 0) {
     const values: unknown[] = [];
     const rows: string[] = [];

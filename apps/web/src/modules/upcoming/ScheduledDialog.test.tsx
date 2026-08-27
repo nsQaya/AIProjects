@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { CategoryDTO, CostCenterDTO } from "@defterx/contracts";
-import type { AccountView } from "../../finance/finance-views";
+import type { AccountView, ScheduledTransactionView } from "../../finance/finance-views";
 import { ScheduledDialog } from "./ScheduledDialog";
 
 const accounts = ["Banka", "Nakit"].map((name, index) => ({
@@ -47,6 +47,37 @@ const costCenter = {
   isActive: true,
   version: 1,
 } satisfies CostCenterDTO;
+
+const scheduledItem = {
+  id: "scheduled-1",
+  bookId: "book-1",
+  accountId: accounts[0]!.id,
+  targetAccountId: null,
+  transactionType: "EXPENSE",
+  categoryId: category.id,
+  costCenterId: null,
+  costCenterName: null,
+  contactId: null,
+  title: "Aylık yakıt",
+  amount: "1000.000000",
+  currencyCode: "TRY",
+  scheduledAt: "2026-08-25T12:00:00.000Z",
+  reminderAt: null,
+  status: "PENDING",
+  seriesId: null,
+  recurrenceFrequency: null,
+  recurrenceInterval: null,
+  recurrenceEndAt: null,
+  completedTransactionId: null,
+  version: 1,
+  ui: {
+    kind: "expense",
+    date: "2026-08-25",
+    amount: 1000,
+    categoryName: category.name,
+    costCenterName: "",
+  },
+} satisfies ScheduledTransactionView;
 
 describe("ScheduledDialog", () => {
   it("transferde hedef hesabı, tekrarda bitiş tarihini gösterir", async () => {
@@ -96,6 +127,33 @@ describe("ScheduledDialog", () => {
           targetAccountId: null,
         }),
         null,
+      );
+    });
+  });
+
+  it("düzenlemede API tutarını virgülle gösterir ve ondalığı bozmadan kaydeder", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <ScheduledDialog
+        accounts={accounts}
+        categories={[category]}
+        costCenters={[costCenter]}
+        item={scheduledItem}
+        onClose={vi.fn()}
+        onSave={onSave}
+        open
+      />,
+    );
+
+    expect(screen.getByLabelText("Tutar")).toHaveValue("1000,000000");
+    await user.click(screen.getByRole("button", { name: "Kaydet" }));
+
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledWith(
+        expect.objectContaining({ amount: "1000" }),
+        scheduledItem,
       );
     });
   });

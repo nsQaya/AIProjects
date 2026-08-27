@@ -18,10 +18,14 @@ export function InvestmentsRoute() {
       .then(() => {
         if (cancelled) return undefined;
         setValueHistoryBusy(true);
+        // Always daily: unlike the dashboard's cash-flow chart, this chart
+        // should stay fine-grained at every date range so the line reads
+        // like a price chart (fintables-style) instead of coarsening into
+        // weekly/monthly/yearly steps for longer windows.
         return service.loadInvestmentValueSeries({
           from: window.from,
           to: window.to,
-          granularity: window.granularity,
+          granularity: "day",
         });
       })
       .then((series) => {
