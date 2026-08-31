@@ -165,6 +165,14 @@ export const reportAnalyticsSchema = z.object({
     realizedGain: decimalStringSchema,
     unrealizedGain: decimalStringSchema,
     totalAssets: decimalStringSchema,
+    cashAccounts: z.array(z.object({
+      accountId: uuidSchema,
+      name: z.string(),
+      accountTypeName: z.string(),
+      currencyCode: currencyCodeSchema,
+      balance: decimalStringSchema,
+      balanceTry: decimalStringSchema,
+    })),
     items: z.array(z.object({
       instrumentId: uuidSchema,
       name: z.string(),

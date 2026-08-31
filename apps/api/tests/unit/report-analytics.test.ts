@@ -20,6 +20,7 @@ describe("report analytics", () => {
       [{ instrumentId: INSTRUMENT_ID, name: "Fon", symbol: "FON", assetTypeName: "Fon", currencyCode: "TRY", quantity: "1", costBasis: "100", currentValue: "120", realizedGain: "5", unrealizedGain: "20", latestPriceAt: "2026-08-14T00:00:00.000Z", investmentCost: "100", investmentValue: "120", totalRealizedGain: "5", totalUnrealizedGain: "20" }],
       [{ period: "2026-08", periodStart: "2026-08-01T00:00:00.000Z", value: "120" }],
       [{ cashBalance: "160" }],
+      [{ accountId: ACCOUNT_ID, name: "Banka", accountTypeName: "Banka", currencyCode: "TRY", balance: "160", balanceTry: "160" }],
     ];
     let call = 0;
     const pool = {
@@ -44,6 +45,9 @@ describe("report analytics", () => {
     expect(report.liquidity.items[0]).not.toHaveProperty("openingBalance");
     expect(report.netWorth.totalAssets).toBe("280");
     expect(report.netWorth.items[0]?.instrumentId).toBe(INSTRUMENT_ID);
+    expect(report.netWorth.cashAccounts).toEqual([
+      { accountId: ACCOUNT_ID, name: "Banka", accountTypeName: "Banka", currencyCode: "TRY", balance: "160", balanceTry: "160" },
+    ]);
     expect(calls[1]).toEqual([
       BOOK_ID,
       "2026-08-01T00:00:00.000Z",
@@ -61,6 +65,6 @@ describe("report analytics", () => {
       [ACCOUNT_ID],
       false,
     ]);
-    expect(calls.map((values) => values.length)).toEqual([1, 8, 8, 5, 5, 8, 5, 5, 8, 5]);
+    expect(calls.map((values) => values.length)).toEqual([1, 8, 8, 5, 5, 8, 5, 5, 8, 5, 5]);
   });
 });

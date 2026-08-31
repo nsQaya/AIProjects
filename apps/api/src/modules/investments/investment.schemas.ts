@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { currency, isoDate, money, quantity, uuid, version } from "../../common/schemas";
+import { currency, isoDate, money, nonnegativeMoney, quantity, uuid, version } from "../../common/schemas";
 
 export const createAssetTypeSchema = z.object({
   bookId:uuid,name:z.string().trim().min(1).max(80),icon:z.string().trim().max(50).nullable().optional(),sortOrder:z.number().int().default(0),
@@ -28,6 +28,10 @@ export const updateLotSchema = z.object({
   purchasedAt:isoDate.optional(),notes:z.string().max(1000).nullable().optional(),version,
 });
 export const createPriceSchema = z.object({price:money,pricedAt:isoDate});
+export const createCapitalIncreaseSchema = z.object({
+  bookId:uuid,instrumentId:uuid,newTotalQuantity:quantity,amountPaid:nonnegativeMoney,
+  accountId:uuid.nullable().optional(),effectiveAt:isoDate,notes:z.string().max(1000).nullable().optional(),
+});
 export const createSaleSchema = z.object({
   bookId:uuid,instrumentId:uuid,destinationAccountId:uuid,quantity,unitPrice:money,
   soldAt:isoDate,notes:z.string().max(1000).nullable().optional(),clientOperationId:uuid,
@@ -43,5 +47,6 @@ export type UpdateInstrumentInput=z.infer<typeof updateInstrumentSchema>;
 export type CreateLotInput=z.infer<typeof createLotSchema>;
 export type UpdateLotInput=z.infer<typeof updateLotSchema>;
 export type CreatePriceInput=z.infer<typeof createPriceSchema>;
+export type CreateCapitalIncreaseInput=z.infer<typeof createCapitalIncreaseSchema>;
 export type CreateSaleInput=z.infer<typeof createSaleSchema>;
 export type UpdateSaleInput=z.infer<typeof updateSaleSchema>;

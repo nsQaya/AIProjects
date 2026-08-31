@@ -28,6 +28,28 @@ it('reopens only the future plan linked to a reversed realization and keeps retr
   expect(audits.rows[0].oldValues).toMatchObject({status:'COMPLETED',completedTransactionId:linkedRealization.transaction.id,version:linked.version+1});
   expect(audits.rows[0].newValues).toMatchObject({status:'PENDING',completedTransactionId:null,version:linked.version+2,reversalTransactionId:first.id});
 });
+it('applies amount, account, title and category overrides when realizing a plan',async()=>{
+  const at=new Date(Date.now()+86_400_000).toISOString();
+  const plan=await createScheduled(pool,userId,{bookId,accountId:cashId,transactionType:'EXPENSE',categoryId:expenseCategoryId,title:'Aylık fatura',amount:'100',currencyCode:'TRY',scheduledAt:at});
+  const realized=await realizeScheduled(pool,userId,plan.id,{
+    version:plan.version,clientOperationId:crypto.randomUUID(),
+    amount:'137.50',accountId:bankId,title:'Ağustos faturası',categoryId:expenseCategoryId,
+    transactionDate:new Date().toISOString(),
+  });
+  expect(realized.transaction).toMatchObject({type:'EXPENSE',title:'Ağustos faturası',accountId:bankId});
+  const entry=await pool.query(`SELECT amount::text FROM transaction_entries WHERE transaction_id=$1 AND account_id=$2`,[realized.transaction.id,bankId]);
+  expect(entry.rows[0].amount).toMatch(/^137\.5/);
+  expect(realized.scheduled).toMatchObject({status:'COMPLETED',completedTransactionId:realized.transaction.id});
+});
+it('turns an expense plan into a transfer on realize, dropping its category',async()=>{
+  const at=new Date(Date.now()+86_400_000).toISOString();
+  const plan=await createScheduled(pool,userId,{bookId,accountId:cashId,transactionType:'EXPENSE',categoryId:expenseCategoryId,title:'Kira',amount:'500',currencyCode:'TRY',scheduledAt:at});
+  const realized=await realizeScheduled(pool,userId,plan.id,{
+    version:plan.version,clientOperationId:crypto.randomUUID(),
+    transactionType:'TRANSFER',targetAccountId:bankId,transactionDate:new Date().toISOString(),
+  });
+  expect(realized.transaction).toMatchObject({type:'TRANSFER',targetAccountId:bankId,categoryId:null});
+});
 it('reopens a past realized plan as overdue',async()=>{
   const pastAt=new Date(Date.now()-86_400_000).toISOString();
   const scheduled=await createScheduled(pool,userId,{bookId,accountId:cashId,transactionType:'INCOME',categoryId:incomeCategoryId,title:'Past plan',amount:'50',currencyCode:'TRY',scheduledAt:pastAt});

@@ -89,6 +89,19 @@ export interface RealizeScheduledTransactionRequest {
   version: Version;
   transactionDate?: ISODateTimeString;
   clientOperationId: UUID;
+  /**
+   * Optional edits applied over the plan's own values when posting the
+   * transaction. Any field left undefined keeps the plan's value. When the
+   * resolved type is TRANSFER the category and cost center are dropped and a
+   * target account is required; otherwise the target account is dropped.
+   */
+  transactionType?: Exclude<ScheduledTransactionType, "SALE" | "PURCHASE" | "COLLECTION" | "PAYMENT">;
+  accountId?: UUID;
+  targetAccountId?: UUID | null;
+  categoryId?: UUID | null;
+  costCenterId?: UUID | null;
+  title?: string;
+  amount?: MoneyString;
 }
 
 export interface ScheduledTransactionGroups {

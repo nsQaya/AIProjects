@@ -193,35 +193,165 @@ export function liquidityOption(
   };
 }
 
-export function netWorthOption(
+export interface AssetTreeNode {
+  name: string;
+  value: number;
+  itemStyle?: { color?: string };
+  children?: AssetTreeNode[];
+}
+
+// Solid, distinct shades per branch — greens for cash, blues for investments.
+const CASH_SHADES = ["#2f855a", "#3f9c6f", "#54ac80", "#6cbd96", "#8bcfae"] as const;
+const INVEST_SHADES = ["#3a6ba8", "#4f80bd", "#6b98cd", "#8bb1db", "#aac8e7"] as const;
+const CASH_ROOT = "#215f43";
+const INVEST_ROOT = "#2c5688";
+
+/**
+ * Builds the net-worth hierarchy the chart renders:
+ *   Görünen varlık
+ *     ├─ Nakit ─ {hesap türü} ─ {hesap}
+ *     └─ Yatırım ─ {varlık türü} ─ {enstrüman}
+ * Only positive contributors are charted; net debt from negative accounts is
+ * reported separately by the caller.
+ */
+export function netWorthBreakdown(netWorth: ReportAnalyticsResponse["netWorth"]): {
+  nodes: AssetTreeNode[];
+  charted: number;
+  debt: number;
+} {
+  type Group = { name: string; value: number; children: AssetTreeNode[] };
+  const bucket = (map: Map<string, Group>, key: string): Group => {
+    let group = map.get(key);
+    if (!group) {
+      group = { name: key, value: 0, children: [] };
+      map.set(key, group);
+    }
+    return group;
+  };
+
+  const cashTypes = new Map<string, Group>();
+  let debt = 0;
+  for (const account of netWorth.cashAccounts) {
+    const value = Number(account.balanceTry);
+    if (value < 0) {
+      debt += value;
+      continue;
+    }
+    if (value === 0) continue;
+    const group = bucket(cashTypes, account.accountTypeName);
+    group.value += value;
+    group.children.push({ name: account.name, value });
+  }
+
+  const investmentTypes = new Map<string, Group>();
+  for (const item of netWorth.items) {
+    const value = Number(item.currentValueTRY ?? item.costBasisTRY ?? "0");
+    if (value <= 0) continue;
+    const group = bucket(investmentTypes, item.assetTypeName);
+    group.value += value;
+    group.children.push({ name: item.symbol || item.name, value });
+  }
+
+  const paint = (groups: Group[], shades: readonly string[]): AssetTreeNode[] =>
+    [...groups]
+      .sort((left, right) => right.value - left.value)
+      .map((group, index) => {
+        const color = shades[index % shades.length];
+        return {
+          name: group.name,
+          value: group.value,
+          itemStyle: { color },
+          children: [...group.children]
+            .sort((a, b) => b.value - a.value)
+            .map((child) => ({ ...child, itemStyle: { color } })),
+        };
+      });
+
+  const cashChildren = paint([...cashTypes.values()], CASH_SHADES);
+  const investmentChildren = paint([...investmentTypes.values()], INVEST_SHADES);
+  const cashTotal = cashChildren.reduce((sum, node) => sum + node.value, 0);
+  const investmentTotal = investmentChildren.reduce((sum, node) => sum + node.value, 0);
+
+  const nodes: AssetTreeNode[] = [];
+  if (cashTotal > 0) {
+    nodes.push({ name: "Nakit", value: cashTotal, itemStyle: { color: CASH_ROOT }, children: cashChildren });
+  }
+  if (investmentTotal > 0) {
+    nodes.push({ name: "Yatırım", value: investmentTotal, itemStyle: { color: INVEST_ROOT }, children: investmentChildren });
+  }
+  return { nodes, charted: cashTotal + investmentTotal, debt };
+}
+
+export function netWorthTreemapOption(
   netWorth: ReportAnalyticsResponse["netWorth"],
 ): ReportChartOption {
-  const rows = [
-    { name: "Nakit ve hesaplar", value: Number(netWorth.cashBalance) },
-    { name: "Yatırımlar", value: Number(netWorth.investmentValue) },
-  ].filter((item) => item.value !== 0);
+  const { nodes, charted } = netWorthBreakdown(netWorth);
   return {
-    animationDuration: 350,
-    aria: { enabled: true, decal: { show: true }, description: "Toplam varlığın nakit ve yatırım dağılımı." },
-    color: ["#287b60", "#456fa9"],
-    title: {
-      text: money(Number(netWorth.totalAssets)),
-      subtext: "Toplam varlık",
-      left: "center",
-      top: "40%",
-      textStyle: { color: "#1c2924", fontFamily: "Georgia, serif", fontSize: 18 },
-      subtextStyle: { color: "#75827c", fontSize: 10 },
+    animationDuration: 320,
+    aria: {
+      enabled: true,
+      description: `Toplam varlığın nakit ve yatırım kırılımı. Görünen varlık ${money(charted)}.`,
     },
-    tooltip: { trigger: "item", valueFormatter: (value) => money(Number(value)) },
-    legend: { bottom: 0 },
-    series: [{
-      name: "Varlık",
-      type: "pie",
-      radius: ["56%", "80%"],
-      center: ["50%", "46%"],
-      label: { show: false },
-      itemStyle: { borderColor: "#fff", borderWidth: 3, borderRadius: 5 },
-      data: rows,
-    }],
+    tooltip: {
+      trigger: "item",
+      formatter: (params) => {
+        const info = params as { name?: string; value?: number; treePathInfo?: Array<{ name: string }> };
+        const path = (info.treePathInfo ?? [])
+          .slice(1)
+          .map((node) => node.name)
+          .filter(Boolean)
+          .join(" › ");
+        const share = charted > 0 ? ` · %${Math.round(((info.value ?? 0) / charted) * 100)}` : "";
+        return `${path || info.name || ""}<br/><b>${money(Number(info.value ?? 0))}</b>${share}`;
+      },
+    },
+    series: [
+      {
+        name: "Varlık",
+        type: "treemap",
+        top: 6,
+        left: 6,
+        right: 6,
+        bottom: 26,
+        roam: false,
+        nodeClick: "zoomToNode",
+        leafDepth: 2,
+        visibleMin: Math.max(1, charted * 0.004),
+        breadcrumb: {
+          show: true,
+          bottom: 2,
+          height: 20,
+          emptyItemWidth: 22,
+          itemStyle: { color: "#eef3f0", borderColor: "#dbe5e0", borderWidth: 1, textStyle: { color: "#4d5b55", fontSize: 10 } },
+          emphasis: { itemStyle: { color: "#dce9e2" } },
+        },
+        label: {
+          show: true,
+          overflow: "truncate",
+          formatter: (params) => {
+            const info = params as { name?: string; value?: number };
+            return `{n|${info.name ?? ""}}\n{v|${shortMoney(Number(info.value ?? 0))}}`;
+          },
+          rich: {
+            n: { fontSize: 11, fontWeight: 600, color: "#ffffff", lineHeight: 15 },
+            v: { fontSize: 9, color: "rgba(255,255,255,0.82)", lineHeight: 13 },
+          },
+        },
+        upperLabel: {
+          show: true,
+          height: 22,
+          color: "#ffffff",
+          fontSize: 11,
+          fontWeight: 700,
+        },
+        itemStyle: { borderColor: "#ffffff", borderWidth: 1, gapWidth: 2 },
+        levels: [
+          { itemStyle: { gapWidth: 4, borderWidth: 0 }, upperLabel: { show: true } },
+          { itemStyle: { gapWidth: 2, borderWidth: 2, borderColor: "#ffffff" }, upperLabel: { show: true } },
+          { itemStyle: { gapWidth: 1, borderWidth: 1, borderColor: "#ffffff" } },
+        ],
+        data: nodes,
+      },
+    ],
   };
 }

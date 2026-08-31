@@ -43,6 +43,7 @@ export const accountTypeSchema = z.object({
     "SUPPLIER",
     "OTHER",
   ]).nullable(),
+  isInvestment: z.boolean(),
   isSystem: z.boolean(),
   isActive: z.boolean(),
   sortOrder: z.number().int(),
@@ -63,6 +64,7 @@ export const accountSchema = z.object({
   accountTypeId: uuidSchema,
   accountTypeName: z.string(),
   accountTypeIcon: z.string().nullable(),
+  isInvestment: z.boolean(),
   normalBalance: z.enum(["DEBIT", "CREDIT"]),
   currencyCode: currencyCodeSchema,
   allowNegativeBalance: z.boolean(),
@@ -72,6 +74,8 @@ export const accountSchema = z.object({
   version: versionSchema,
   balance: decimalStringSchema,
   displayBalance: decimalStringSchema,
+  displayBalanceTry: decimalStringSchema,
+  openingBalance: decimalStringSchema,
   availableCredit: decimalStringSchema.nullable(),
 });
 

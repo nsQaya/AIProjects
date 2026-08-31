@@ -121,6 +121,7 @@ function defaultResponse(path: string, options: RequestOptions<unknown>): unknow
         realizedGain: "0",
         unrealizedGain: "0",
         totalAssets: "0",
+        cashAccounts: [],
         items: [],
       },
     };

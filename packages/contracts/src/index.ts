@@ -8,4 +8,5 @@ export type * from "./transactions.js";
 export type * from "./scheduled-transactions.js";
 export type * from "./reports.js";
 export type * from "./investments.js";
+export type * from "./fx.js";
 export type * from "./currencies.js";

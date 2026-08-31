@@ -263,6 +263,13 @@ suite("PostgreSQL cost-center integration",()=>{
     }));
     expect(Number(report.netWorth.investmentValue)).toBe(1250);
     expect(report.netWorth).toEqual(expect.objectContaining({cashBalance:expect.any(String),totalAssets:expect.any(String)}));
+    expect(report.netWorth.cashAccounts).toEqual(expect.arrayContaining([expect.objectContaining({
+      accountId:cashId,
+      accountTypeName:expect.any(String),
+      currencyCode:"TRY",
+      balance:expect.any(String),
+      balanceTry:expect.any(String),
+    })]));
 
     const allAccounts=await loadReportAnalytics(pool,{
       bookId,

@@ -42,7 +42,7 @@ const inactiveCostCenter: CostCenterDTO = {
 
 const accountType:AccountTypeDTO={
   id:"account-type-1",bookId:"book-1",name:"Banka",icon:null,normalBalance:"DEBIT",
-  defaultAllowNegativeBalance:false,purpose:null,isSystem:true,isActive:true,sortOrder:1,version:1,
+  defaultAllowNegativeBalance:false,purpose:null,isInvestment:false,isSystem:true,isActive:true,sortOrder:1,version:1,
 };
 
 const investmentType:InvestmentAssetTypeDTO={
@@ -377,7 +377,7 @@ describe("SettingsPage account type management",()=>{
 
     await waitFor(()=>expect(onSaveAccountType).toHaveBeenCalledWith({
       mode:"update",id:"account-type-1",name:"Vadesiz",
-      normalBalance:"CREDIT",defaultAllowNegativeBalance:false,sortOrder:5,version:1,
+      normalBalance:"CREDIT",defaultAllowNegativeBalance:false,isInvestment:false,sortOrder:5,version:1,
     }));
   });
 
@@ -403,11 +403,12 @@ describe("SettingsPage account type management",()=>{
     await user.type(within(dialog).getByLabelText("Tür adı"),"Kredi kartı 2");
     await user.selectOptions(within(dialog).getByLabelText("Bakiye yönü"),"CREDIT");
     await user.click(within(dialog).getByLabelText("Yeni hesaplarda eksi bakiyeye varsayılan olarak izin ver"));
+    await user.click(within(dialog).getByLabelText(/Aracı kurum \/ yatırım hesabı/));
     await user.click(within(dialog).getByRole("button",{name:"Kaydet"}));
 
     await waitFor(()=>expect(onSaveAccountType).toHaveBeenCalledWith({
       mode:"create",name:"Kredi kartı 2",
-      normalBalance:"CREDIT",defaultAllowNegativeBalance:true,sortOrder:0,
+      normalBalance:"CREDIT",defaultAllowNegativeBalance:true,isInvestment:true,sortOrder:0,
     }));
   });
 });

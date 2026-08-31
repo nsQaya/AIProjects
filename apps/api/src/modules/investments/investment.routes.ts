@@ -5,16 +5,16 @@ import { AppError } from "../../common/errors";
 import { parseJson } from "../../common/validation";
 import { requireBookRole } from "../../middleware/book-access";
 import {
-  createAssetTypeSchema,createInstrumentSchema,createLotSchema,createPriceSchema,createSaleSchema,
+  createAssetTypeSchema,createCapitalIncreaseSchema,createInstrumentSchema,createLotSchema,createPriceSchema,createSaleSchema,
   updateAssetTypeSchema,updateInstrumentSchema,updateLotSchema,updateSaleSchema,
 } from "./investment.schemas";
 import {
-  assetTypeBookId,createAssetType,createInstrument,createLot,deleteAssetType,deleteInstrument,deleteLot,
-  createSale,deleteSale,instrumentBookId,listAssetTypes,listInstruments,listLots,listSales,lotBookId,portfolio,saleBookId,setInstrumentPrice,
+  assetTypeBookId,createAssetType,createCapitalIncrease,createInstrument,createLot,deleteAssetType,deleteInstrument,deleteLot,
+  createSale,deleteSale,instrumentBookId,listAssetTypes,listBrokerageAccounts,listInstruments,listLots,listSales,lotBookId,portfolio,saleBookId,setInstrumentPrice,
   updateAssetType,updateInstrument,updateLot,updateSale,
 } from "./investment.service";
 import {
-  createPriceSyncRun,latestPriceSyncRun,listBookInstrumentPrices,searchMarketSymbols,
+  createPriceSyncRun,latestPriceSyncRun,listBookInstrumentPrices,reclaimStalePriceRuns,searchMarketSymbols,
 } from "../market-data/market-data.service";
 
 export const investmentRoutes=new Hono<AppEnv>();
@@ -33,6 +33,7 @@ const calendarDate=z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value=>!Number
 const priceSyncSchema=z.object({bookId:z.string().uuid(),date:calendarDate});
 
 investmentRoutes.get("/portfolio",async c=>{const {client,bookId}=await queryContext(c);return c.json(await portfolio(client,bookId));});
+investmentRoutes.get("/brokerage-accounts",async c=>{const {client,bookId}=await queryContext(c);return c.json(await listBrokerageAccounts(client,bookId));});
 investmentRoutes.get("/asset-types",async c=>{const {client,bookId}=await queryContext(c);return c.json(await listAssetTypes(client,bookId,c.req.query("includeInactive")==="true"));});
 investmentRoutes.post("/asset-types",async c=>{const input=await parseJson(c.req.raw,createAssetTypeSchema),client=c.get("database");await requireBookRole(client,input.bookId,c.get("user").id,"EDITOR");return c.json(await createAssetType(client,c.get("user").id,input),201);});
 investmentRoutes.patch("/asset-types/:id",async c=>{const client=c.get("database"),id=c.req.param("id");await requireBookRole(client,await assetTypeBookId(client,id),c.get("user").id,"EDITOR");return c.json(await updateAssetType(client,c.get("user").id,id,await parseJson(c.req.raw,updateAssetTypeSchema)));});
@@ -57,13 +58,18 @@ investmentRoutes.get("/prices/by-date",async c=>{
 investmentRoutes.get("/prices/sync-status",async c=>{
   const {client}=await queryContext(c),parsed=calendarDate.safeParse(c.req.query("date"));
   if(!parsed.success)throw new AppError(422,"INVALID_DATE","A valid price date is required");
+  await reclaimStalePriceRuns(client);
   return c.json({run:await latestPriceSyncRun(client,parsed.data)});
 });
 investmentRoutes.post("/prices/sync",async c=>{
   const input=await parseJson(c.req.raw,priceSyncSchema),client=c.get("database"),userId=c.get("user").id;
   await requireBookRole(client,input.bookId,userId,"EDITOR");
+  // The manual button wants a price on screen right now, so for today it pulls
+  // the live intraday quote and writes it regardless of whether an official
+  // close exists yet. Back-dated requests still fetch that day's real close.
+  const mode=input.date===new Date().toISOString().slice(0,10)?"LIVE":"CLOSE";
   const run=await createPriceSyncRun(client,input.date,"MANUAL",userId);
-  await c.env.JOBS.send({type:"PLAN_MARKET_PRICES",runId:run.id,targetDate:input.date});
+  await c.env.JOBS.send({type:"PLAN_MARKET_PRICES",runId:run.id,targetDate:input.date,mode});
   return c.json(run,202);
 });
 investmentRoutes.post("/instruments",async c=>{const input=await parseJson(c.req.raw,createInstrumentSchema),client=c.get("database");await requireBookRole(client,input.bookId,c.get("user").id,"EDITOR");return c.json(await createInstrument(client,c.get("user").id,input),201);});
@@ -75,6 +81,7 @@ investmentRoutes.get("/lots",async c=>{const {client,bookId}=await queryContext(
 investmentRoutes.post("/lots",async c=>{const input=await parseJson(c.req.raw,createLotSchema),client=c.get("database");await requireBookRole(client,input.bookId,c.get("user").id,"EDITOR");return c.json(await createLot(client,c.get("user").id,input),201);});
 investmentRoutes.patch("/lots/:id",async c=>{const client=c.get("database"),id=c.req.param("id");await requireBookRole(client,await lotBookId(client,id),c.get("user").id,"EDITOR");return c.json(await updateLot(client,c.get("user").id,id,await parseJson(c.req.raw,updateLotSchema)));});
 investmentRoutes.delete("/lots/:id",async c=>{const client=c.get("database"),id=c.req.param("id");await requireBookRole(client,await lotBookId(client,id),c.get("user").id,"EDITOR");return c.json(await deleteLot(client,c.get("user").id,id,requiredVersion(c)));});
+investmentRoutes.post("/capital-increases",async c=>{const input=await parseJson(c.req.raw,createCapitalIncreaseSchema),client=c.get("database");await requireBookRole(client,input.bookId,c.get("user").id,"EDITOR");return c.json(await createCapitalIncrease(client,c.get("user").id,input),201);});
 
 investmentRoutes.get("/sales",async c=>{const {client,bookId}=await queryContext(c);return c.json(await listSales(client,bookId));});
 investmentRoutes.post("/sales",async c=>{const input=await parseJson(c.req.raw,createSaleSchema),client=c.get("database");await requireBookRole(client,input.bookId,c.get("user").id,"EDITOR");return c.json(await createSale(client,c.get("user").id,input),201);});

@@ -26,38 +26,43 @@ export function TransactionDialog({
   onSave,
   open,
   transaction,
+  prefill,
+  title,
 }: TransactionDialogProps) {
+  const seed = transaction ?? prefill;
   const [kind, setKind] = useState<TransactionFormKind>(
-    () => (transaction?.type.toLowerCase() ?? "expense") as TransactionFormKind,
+    () => ((transaction?.type ?? prefill?.type)?.toLowerCase() ?? "expense") as TransactionFormKind,
   );
   const [amount, setAmount] = useState(
-    () => editableAmount(transaction?.amount ?? "") ?? "",
+    () => editableAmount(seed?.amount ?? "") ?? "",
   );
   const [description, setDescription] = useState(
-    () => transaction?.title ?? "",
+    () => seed?.title ?? "",
   );
-  const [date, setDate] = useState(() => transaction?.transactionDate.slice(0, 10) ?? today());
+  const [date, setDate] = useState(
+    () => (transaction?.transactionDate ?? prefill?.transactionDate)?.slice(0, 10) ?? today(),
+  );
   const [accountId, setAccountId] = useState(
-    () => transaction?.accountId ?? accounts.find((account) => !account.isArchived)?.id ?? "",
+    () => seed?.accountId ?? accounts.find((account) => !account.isArchived)?.id ?? "",
   );
-  const [targetAccountId, setTargetAccountId] = useState(() => transaction?.targetAccountId ?? "");
-  const [categoryId, setCategoryId] = useState(() => transaction?.categoryId ?? "");
-  const [costCenterId, setCostCenterId] = useState(() => transaction?.costCenterId ?? "");
+  const [targetAccountId, setTargetAccountId] = useState(() => seed?.targetAccountId ?? "");
+  const [categoryId, setCategoryId] = useState(() => seed?.categoryId ?? "");
+  const [costCenterId, setCostCenterId] = useState(() => seed?.costCenterId ?? "");
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState("");
 
   const availableAccounts = useMemo(
-    () => accounts.filter((account) => !account.isArchived || account.id === transaction?.accountId || account.id === transaction?.targetAccountId),
-    [accounts, transaction],
+    () => accounts.filter((account) => !account.isArchived || account.id === seed?.accountId || account.id === seed?.targetAccountId),
+    [accounts, seed],
   );
 
   const availableCategories = useMemo(
-    () => categories.filter((category) => category.isActive || category.id === transaction?.categoryId),
-    [categories, transaction],
+    () => categories.filter((category) => category.isActive || category.id === seed?.categoryId),
+    [categories, seed],
   );
   const availableCostCenters = useMemo(
-    () => costCenters.filter((item) => item.isActive || item.id === transaction?.costCenterId),
-    [costCenters, transaction],
+    () => costCenters.filter((item) => item.isActive || item.id === seed?.costCenterId),
+    [costCenters, seed],
   );
 
   const close = () => {
@@ -134,7 +139,10 @@ export function TransactionDialog({
     <Dialog id="transaction-dialog" open={open} onClose={close}>
       <form id="transaction-form" onSubmit={(event) => void submit(event)}>
         <input type="hidden" name="transactionId" value={transaction?.id ?? ""} readOnly />
-        <DialogHeader eyebrow="Canlı kayıt" title={transaction ? "İşlemi düzelt" : "Yeni işlem"} />
+        <DialogHeader
+          eyebrow="Canlı kayıt"
+          title={title ?? (transaction ? "İşlemi düzelt" : "Yeni işlem")}
+        />
 
         <div className="type-tabs">
           {(["expense", "income", "transfer"] as const).map((value) => (

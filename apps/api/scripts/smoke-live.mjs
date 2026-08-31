@@ -92,8 +92,14 @@ const cashflow = (await request(`/api/v1/reports/cash-flow?bookId=${book.id}&fro
 const analytics = (await request(`/api/v1/reports/analytics?bookId=${book.id}&from=2026-08-01T00:00:00.000Z&to=2026-08-31T23:59:59.999Z&granularity=day&accountIds=${account.id}`, { headers: authorization })).payload;
 if (!Array.isArray(analytics.trend) || !Array.isArray(analytics.accountBalances?.items)
   || !Array.isArray(analytics.categoryDetail?.transactions) || !Array.isArray(analytics.liquidity?.items)
-  || !Array.isArray(analytics.netWorth?.items) || analytics.granularity !== "day") {
+  || !Array.isArray(analytics.netWorth?.items) || !Array.isArray(analytics.netWorth?.cashAccounts)
+  || analytics.granularity !== "day") {
   throw new Error("Five-report analytics response is incomplete");
+}
+if (analytics.netWorth.cashAccounts.some(
+  (row) => typeof row.accountId !== "string" || typeof row.accountTypeName !== "string" || typeof row.balanceTry !== "string",
+)) {
+  throw new Error(`Net-worth cash breakdown rows are malformed: ${JSON.stringify(analytics.netWorth.cashAccounts)}`);
 }
 if (!cashflow.items.some((item) => item.month === "2026-08" && Number(item.expense) === 125.5)) throw new Error(`Cash-flow report did not use the posted live expense: ${JSON.stringify(cashflow)}`);
 
@@ -106,6 +112,17 @@ const changedAccountType=(await request(`/api/v1/accounts/${restrictedAccount.id
   body:JSON.stringify({accountTypeId:bankType.id,version:restrictedAccount.version})
 })).payload;
 if(changedAccountType.accountTypeId!==bankType.id)throw new Error("Editable account type was not persisted");
+
+// Opening balance stays editable after the account is in use.
+const openingEditable=(await request("/api/v1/accounts",{method:"POST",headers:authorization,body:JSON.stringify({bookId:book.id,name:"Opening Editable",accountTypeId:bankType.id,currencyCode:"TRY",openingBalance:"1000"})})).payload;
+if(openingEditable.openingBalance!=="1000.000000")throw new Error(`Opening balance not projected on create: ${openingEditable.openingBalance}`);
+const raisedOpening=(await request(`/api/v1/accounts/${openingEditable.id}`,{method:"PATCH",headers:authorization,body:JSON.stringify({openingBalance:"1500",version:openingEditable.version})})).payload;
+if(raisedOpening.openingBalance!=="1500.000000"||raisedOpening.displayBalance!=="1500.000000")throw new Error(`Opening balance edit did not re-post: ${JSON.stringify(raisedOpening)}`);
+const clearedOpening=(await request(`/api/v1/accounts/${openingEditable.id}`,{method:"PATCH",headers:authorization,body:JSON.stringify({openingBalance:"0",version:raisedOpening.version})})).payload;
+if(clearedOpening.openingBalance!=="0"||Number(clearedOpening.displayBalance)!==0)throw new Error(`Opening balance was not cleared: ${JSON.stringify(clearedOpening)}`);
+const openingLedger=(await request(`/api/v1/transactions?bookId=${book.id}&accountIds=${openingEditable.id}`,{headers:authorization})).payload;
+if(openingLedger.items.some((item)=>item.type==="OPENING_BALANCE"))throw new Error("Cleared opening balance still shows a live posting");
+
 async function expectPostingError(accountId,amount,expectedCode){
   const response=await fetch(`${apiBaseUrl}/api/v1/transactions`,{method:"POST",headers:{Origin:webOrigin,"Content-Type":"application/json",Authorization:authorization.Authorization,"Idempotency-Key":randomUUID()},body:JSON.stringify({bookId:book.id,type:"EXPENSE",title:"Limit rejection probe",amount,currencyCode:"TRY",accountId,categoryId:category.id,transactionDate:"2026-08-07T12:00:00.000Z",clientOperationId:randomUUID()})});
   const payload=await response.json();
@@ -142,6 +159,17 @@ const scheduledAfterReversal=(await request(`/api/v1/scheduled-transactions?book
 const reopened=scheduledAfterReversal.items.filter(item=>item.seriesId===scheduledSeries.seriesId&&["PENDING","OVERDUE"].includes(item.status));
 if(reopened.length!==3||scheduledAfterReversal.items.some(item=>item.seriesId===scheduledSeries.seriesId&&item.status==="COMPLETED"))throw new Error("Reversing a realized transaction did not reopen its scheduled occurrence");
 
+// Realizing with edited amount / title / account posts the transaction with the overrides.
+const overrideTarget=reopened[0];
+const overridden=(await request(`/api/v1/scheduled-transactions/${overrideTarget.id}/realize`,{
+  method:"POST",headers:authorization,
+  body:JSON.stringify({version:overrideTarget.version,clientOperationId:randomUUID(),transactionDate:"2026-08-12T12:00:00.000Z",amount:"73.25",title:"Edited smoke payment"})
+})).payload;
+if(overridden.transaction?.title!=="Edited smoke payment"||overridden.scheduled?.status!=="COMPLETED")throw new Error(`Realize overrides were not applied: ${JSON.stringify(overridden)}`);
+const overriddenTx=(await request(`/api/v1/transactions?bookId=${book.id}`,{headers:authorization})).payload.items.find(item=>item.id===overridden.transaction.id);
+if(!overriddenTx||Number(overriddenTx.amount)!==73.25||overriddenTx.title!=="Edited smoke payment")throw new Error(`Overridden realize did not persist: ${JSON.stringify(overriddenTx)}`);
+await request(`/api/v1/transactions/${overridden.transaction.id}/reverse?bookId=${book.id}`,{method:"POST",headers:{...authorization,"Idempotency-Key":randomUUID()},body:JSON.stringify({clientOperationId:randomUUID(),reason:"Override realize smoke cleanup"})});
+
 const cashflowDaily=(await request(`/api/v1/reports/cash-flow?bookId=${book.id}&from=2026-08-01T00:00:00.000Z&to=2026-08-31T23:59:59.999Z&granularity=day`,{headers:authorization})).payload;
 if(cashflowDaily.granularity!=="day"||cashflowDaily.items.length!==31||!cashflowDaily.items.every(item=>item.period&&item.periodStart))throw new Error("Detailed daily cash-flow grouping failed");
 if(Number(cashflowDaily.items.at(-1)?.balance)!==874.5)throw new Error(`Period-end balance was not calculated from live entries: ${JSON.stringify(cashflowDaily.items.at(-1))}`);
@@ -158,27 +186,48 @@ if(Number(carriedLedger.openingBalance)!==874.5||carriedLedger.items.length!==0)
 const noAccountLedger=(await request(`/api/v1/transactions?bookId=${book.id}&accountIds=none&limit=1000`,{headers:authorization})).payload;
 if(noAccountLedger.items.length||Number(noAccountLedger.openingBalance)!==0)throw new Error("Empty multi-account transaction filter failed");
 
+const investmentType=accountTypes.items.find((item)=>item.name==="Birikim");
+if(!investmentType)throw new Error("Seeded Birikim investment account type was not found");
+const brokerage=(await request("/api/v1/accounts",{method:"POST",headers:authorization,body:JSON.stringify({bookId:book.id,name:"Smoke Piapiri",accountTypeId:investmentType.id,currencyCode:"TRY",openingBalance:"0"})})).payload;
 const assetTypes=(await request(`/api/v1/investments/asset-types?bookId=${book.id}`,{headers:authorization})).payload;
 const instrument=(await request("/api/v1/investments/instruments",{method:"POST",headers:authorization,body:JSON.stringify({bookId:book.id,assetTypeId:assetTypes.items[0].id,name:"Smoke Fund",symbol:"SMK",currencyCode:"TRY"})})).payload;
 await request("/api/v1/investments/lots",{method:"POST",headers:authorization,body:JSON.stringify({bookId:book.id,instrumentId:instrument.id,quantity:"10",unitPrice:"100",purchasedAt:"2026-08-01T12:00:00.000Z"})});
-const sale=(await request("/api/v1/investments/sales",{method:"POST",headers:authorization,body:JSON.stringify({bookId:book.id,instrumentId:instrument.id,destinationAccountId:account.id,quantity:"4",unitPrice:"120",soldAt:"2026-08-07T12:00:00.000Z",clientOperationId:randomUUID()})})).payload;
+const sale=(await request("/api/v1/investments/sales",{method:"POST",headers:authorization,body:JSON.stringify({bookId:book.id,instrumentId:instrument.id,destinationAccountId:brokerage.id,quantity:"4",unitPrice:"120",soldAt:"2026-08-07T12:00:00.000Z",clientOperationId:randomUUID()})})).payload;
 if(Number(sale.proceeds)!==480)throw new Error(`Unexpected sale proceeds: ${sale.proceeds}`);
 if(Number(sale.gain)!==80)throw new Error(`Unexpected sale gain: ${sale.gain}`);
 const positionAfterSale=(await request(`/api/v1/investments/portfolio?bookId=${book.id}`,{headers:authorization})).payload;
-if(positionAfterSale.items[0]?.quantity!=="6.00000000"||Number(positionAfterSale.items[0]?.costBasis)!==600)throw new Error("Investment sale did not reduce portfolio quantity and cost basis");
-const balanceAfterSale=(await request(`/api/v1/accounts/${account.id}/balance`,{headers:authorization})).payload;
-if(Number(balanceAfterSale.balance)!==1354.5)throw new Error(`Sale proceeds did not reach destination account: ${balanceAfterSale.balance}`);
-const updatedSale=(await request(`/api/v1/investments/sales/${sale.id}`,{method:"PATCH",headers:authorization,body:JSON.stringify({instrumentId:instrument.id,destinationAccountId:account.id,quantity:"3",unitPrice:"130",soldAt:"2026-08-08T12:00:00.000Z",notes:"Updated smoke sale",clientOperationId:randomUUID(),reversalClientOperationId:randomUUID(),version:sale.version})})).payload;
+if(Number(positionAfterSale.items[0]?.quantity)!==6||Number(positionAfterSale.items[0]?.costBasis)!==600)throw new Error("Investment sale did not reduce portfolio quantity and cost basis");
+const balanceAfterSale=(await request(`/api/v1/accounts/${brokerage.id}/balance`,{headers:authorization})).payload;
+if(Number(balanceAfterSale.balance)!==480)throw new Error(`Sale proceeds did not reach destination account: ${balanceAfterSale.balance}`);
+const updatedSale=(await request(`/api/v1/investments/sales/${sale.id}`,{method:"PATCH",headers:authorization,body:JSON.stringify({instrumentId:instrument.id,destinationAccountId:brokerage.id,quantity:"3",unitPrice:"130",soldAt:"2026-08-08T12:00:00.000Z",notes:"Updated smoke sale",clientOperationId:randomUUID(),reversalClientOperationId:randomUUID(),version:sale.version})})).payload;
 if(Number(updatedSale.proceeds)!==390||Number(updatedSale.gain)!==90||updatedSale.transactionId===sale.transactionId)throw new Error(`Investment sale update failed: ${JSON.stringify(updatedSale)}`);
-const balanceAfterSaleUpdate=(await request(`/api/v1/accounts/${account.id}/balance`,{headers:authorization})).payload;
-if(Number(balanceAfterSaleUpdate.balance)!==1264.5)throw new Error(`Updated sale did not replace account proceeds: ${balanceAfterSaleUpdate.balance}`);
+const balanceAfterSaleUpdate=(await request(`/api/v1/accounts/${brokerage.id}/balance`,{headers:authorization})).payload;
+if(Number(balanceAfterSaleUpdate.balance)!==390)throw new Error(`Updated sale did not replace account proceeds: ${balanceAfterSaleUpdate.balance}`);
 const positionAfterSaleUpdate=(await request(`/api/v1/investments/portfolio?bookId=${book.id}`,{headers:authorization})).payload;
-if(positionAfterSaleUpdate.items[0]?.quantity!=="7.00000000"||Number(positionAfterSaleUpdate.items[0]?.costBasis)!==700)throw new Error("Updated sale did not recalculate portfolio position");
+if(Number(positionAfterSaleUpdate.items[0]?.quantity)!==7||Number(positionAfterSaleUpdate.items[0]?.costBasis)!==700)throw new Error("Updated sale did not recalculate portfolio position");
 await request(`/api/v1/investments/sales/${sale.id}?version=${updatedSale.version}`,{method:"DELETE",headers:authorization});
 const salesAfterDelete=(await request(`/api/v1/investments/sales?bookId=${book.id}`,{headers:authorization})).payload;
-const balanceAfterSaleDelete=(await request(`/api/v1/accounts/${account.id}/balance`,{headers:authorization})).payload;
+const balanceAfterSaleDelete=(await request(`/api/v1/accounts/${brokerage.id}/balance`,{headers:authorization})).payload;
 const positionAfterSaleDelete=(await request(`/api/v1/investments/portfolio?bookId=${book.id}`,{headers:authorization})).payload;
-if(salesAfterDelete.items.length!==0||Number(balanceAfterSaleDelete.balance)!==874.5||positionAfterSaleDelete.items[0]?.quantity!=="10.00000000")throw new Error("Deleted sale did not restore portfolio and account balance");
+if(salesAfterDelete.items.length!==0||Number(balanceAfterSaleDelete.balance)!==0||Number(positionAfterSaleDelete.items[0]?.quantity)!==10)throw new Error("Deleted sale did not restore portfolio and account balance");
+
+// Aşama 5: cross-currency conversion into a foreign brokerage account.
+await request("/api/v1/currencies/USD/enable",{method:"POST",headers:authorization,body:JSON.stringify({bookId:book.id})});
+const usdBrokerage=(await request("/api/v1/accounts",{method:"POST",headers:authorization,body:JSON.stringify({bookId:book.id,name:"Smoke Piapiri USD",accountTypeId:investmentType.id,currencyCode:"USD",openingBalance:"0"})})).payload;
+const fx=(await request("/api/v1/fx/conversions",{method:"POST",headers:authorization,body:JSON.stringify({bookId:book.id,fromAccountId:account.id,toAccountId:usdBrokerage.id,fromAmount:"350",toAmount:"10",transactionDate:"2026-08-07T12:00:00.000Z",clientOperationId:randomUUID()})})).payload;
+if(fx.toCurrency!=="USD"||fx.fromCurrency!=="TRY"||Number(fx.tryAmount)!==350)throw new Error(`FX conversion projection failed: ${JSON.stringify(fx)}`);
+const usdBalance=(await request(`/api/v1/accounts/${usdBrokerage.id}/balance`,{headers:authorization})).payload;
+if(usdBalance.displayBalance!=="10.000000")throw new Error(`Foreign brokerage balance is not in its own currency: ${usdBalance.displayBalance}`);
+if(typeof usdBalance.displayBalanceTry!=="string"||!Number.isFinite(Number(usdBalance.displayBalanceTry)))throw new Error(`Foreign account /balance is missing a TRY figure: ${JSON.stringify(usdBalance)}`);
+const tlBalanceAfterFx=(await request(`/api/v1/accounts/${account.id}/balance`,{headers:authorization})).payload;
+if(Number(tlBalanceAfterFx.displayBalance)!==524.5)throw new Error(`FX conversion did not debit the TL account: ${tlBalanceAfterFx.displayBalance}`);
+if(tlBalanceAfterFx.displayBalanceTry!==tlBalanceAfterFx.displayBalance)throw new Error(`TRY account displayBalanceTry must equal displayBalance: ${tlBalanceAfterFx.displayBalanceTry} vs ${tlBalanceAfterFx.displayBalance}`);
+const brokerageAccounts=(await request(`/api/v1/investments/brokerage-accounts?bookId=${book.id}`,{headers:authorization})).payload;
+const usdRow=brokerageAccounts.items.find((item)=>item.id===usdBrokerage.id);
+if(!usdRow||usdRow.currencyCode!=="USD"||typeof usdRow.displayBalanceTry!=="string")throw new Error("Foreign brokerage account list projection failed");
+await request(`/api/v1/transactions/${fx.id}/reverse?bookId=${book.id}`,{method:"POST",headers:{...authorization,"Idempotency-Key":randomUUID()},body:JSON.stringify({clientOperationId:randomUUID(),reason:"FX smoke reversal"})});
+const usdBalanceAfterReverse=(await request(`/api/v1/accounts/${usdBrokerage.id}/balance`,{headers:authorization})).payload;
+if(Number(usdBalanceAfterReverse.displayBalance)!==0)throw new Error(`Reversing the FX conversion did not clear the foreign balance: ${usdBalanceAfterReverse.displayBalance}`);
 
 const categoryRemoval=(await request(`/api/v1/categories/${category.id}?version=${category.version}`,{method:"DELETE",headers:authorization})).payload;
 if(categoryRemoval.isActive!==false)throw new Error("Used category was not deactivated");
@@ -214,8 +263,10 @@ console.log(JSON.stringify({
   negativeBalanceRule: "passed",
   creditLimitRule: "passed",
   editableAccountType: "passed",
+  editableOpeningBalance: "passed",
   scheduledRecurrence: "passed",
   scheduledRealization: "passed",
+  scheduledRealizeOverrides: "passed",
   scheduledReopenAfterReversal: "passed",
   scheduledStatusFilter: "passed",
   costCenterCrud: "passed",

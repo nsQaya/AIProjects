@@ -6,7 +6,7 @@ import type { MoneyString } from "@defterx/contracts";
  * forms are accepted; the caller retains every fractional digit entered.
  */
 export function positiveDecimalString(value: string): MoneyString | null {
-  let compact = value.trim().replace(/[\s\u00a0']/g, "");
+  let compact = value.trim().replace(/[\s']/g, "");
   if (compact.startsWith("+")) compact = compact.slice(1);
   if (compact === "" || compact.startsWith("-")) return null;
 
@@ -43,4 +43,11 @@ export function positiveDecimalString(value: string): MoneyString | null {
 
 export function isPositiveDecimal(value: MoneyString): boolean {
   return positiveDecimalString(value) !== null;
+}
+
+/** Like positiveDecimalString but also accepts an empty field or an explicit zero, returning "0". */
+export function nonNegativeDecimalString(value: string): MoneyString | null {
+  const compact = value.trim().replace(/[\s']/g, "");
+  if (compact === "" || /^0([.,]0+)?$/.test(compact)) return "0";
+  return positiveDecimalString(value);
 }

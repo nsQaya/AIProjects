@@ -1,6 +1,7 @@
 import { describe,expect,it,vi } from "vitest";
 
 import {
+  fetchYahooLivePrices,
   fetchYahooPrices,
   parseKapEquities,
   parseKapEtfs,
@@ -57,16 +58,28 @@ describe("market data provider", () => {
 
   it("returns only the requested trading day's positive close and tolerates missing symbols", async () => {
     const timestamp = Date.parse("2026-08-14T13:30:00Z") / 1000;
-    const fetcher = vi.fn(async () => new Response(JSON.stringify({
-      spark: { result: [
-        { symbol:"AAPL",response:[{meta:{currency:"USD"},timestamp:[timestamp],indicators:{quote:[{close:[123.45]}],adjclose:[{adjclose:[120]}]}}] },
-        { symbol:"NEW",response:[{meta:{currency:"USD"},timestamp:[],indicators:{quote:[{close:[]}]}}] },
-      ] },
-    }),{status:200,headers:{"Content-Type":"application/json"}})) as typeof fetch;
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const result = String(input).includes("AAPL")
+        ? {meta:{currency:"USD"},timestamp:[timestamp],indicators:{quote:[{close:[123.45]}],adjclose:[{adjclose:[120]}]}}
+        : {meta:{currency:"USD"},timestamp:[],indicators:{quote:[{close:[]}]}};
+      return new Response(JSON.stringify({ chart: { result: [result] } }),{status:200,headers:{"Content-Type":"application/json"}});
+    }) as typeof fetch;
 
     const result = await fetchYahooPrices(["AAPL","NEW"],"2026-08-14",fetcher);
     expect(result.points).toEqual([{
       providerSymbol:"AAPL",priceDate:"2026-08-14",close:"123.45",adjustedClose:"120",currencyCode:"USD",
+    }]);
+    expect(result.failedSymbols).toEqual([]);
+  });
+
+  it("stamps the live intraday quote on targetDate regardless of the bar dates it saw", async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({
+      chart: { result: [{ meta: { currency:"TRY", regularMarketPrice: 312.5 } }] },
+    }),{status:200,headers:{"Content-Type":"application/json"}})) as typeof fetch;
+
+    const result = await fetchYahooLivePrices(["THYAO.IS"],"2026-08-27",fetcher);
+    expect(result.points).toEqual([{
+      providerSymbol:"THYAO.IS",priceDate:"2026-08-27",close:"312.5",adjustedClose:null,currencyCode:"TRY",
     }]);
     expect(result.failedSymbols).toEqual([]);
   });

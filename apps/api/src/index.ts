@@ -34,6 +34,15 @@ export default {
       const targetDate = new Date(controller.scheduledTime).toISOString().slice(0,10);
       ctx.waitUntil(env.JOBS.send({ type: "SYNC_CURRENCY_RATES",targetDate }));
     }
+    // Hourly while BIST/US are open (07:00-21:00 UTC, Mon-Fri): pull the current
+    // intraday quote for every tracked code and stamp it on today unconditionally.
+    if (controller.cron === "0 7-21 * * 1-5") {
+      const targetDate = new Date(controller.scheduledTime).toISOString().slice(0,10);
+      ctx.waitUntil(withDatabase(env,async client=>{
+        const run=await createPriceSyncRun(client,targetDate,"SCHEDULED");
+        await env.JOBS.send({type:"PLAN_MARKET_PRICES",runId:run.id,targetDate,mode:"LIVE"});
+      }));
+    }
   },
   async queue(batch: MessageBatch<BackgroundJob>, env: Env) {
     await withDatabase(env, async (client) => {
@@ -43,7 +52,7 @@ export default {
           if (job.type === "PROCESS_RECURRING") await processDueRecurring(client, job.recurringId);
           else if(job.type === "ENSURE_MARKET_DATA") await ensureMarketData(client,env.JOBS,job.targetDate);
           else if(job.type === "SYNC_MARKET_CATALOG") await syncMarketCatalog(client);
-          else if(job.type === "PLAN_MARKET_PRICES") await planPriceSync(client,env.JOBS,job.runId,job.targetDate);
+          else if(job.type === "PLAN_MARKET_PRICES") await planPriceSync(client,env.JOBS,job.runId,job.targetDate,job.mode ?? "CLOSE");
           else if(job.type === "FETCH_MARKET_PRICE_BATCH") await processPriceBatch(client,job);
           else if(job.type === "FETCH_FUND_PRICE_BATCH") await processFundPriceBatch(client,job);
           else if(job.type === "PLAN_MARKET_SPLITS") await queueLinkedSplitBatches(client,env.JOBS);

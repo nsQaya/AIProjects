@@ -1,12 +1,15 @@
 import { Money } from "@defterx/shared";
 import { AppError } from "../../common/errors";
 import { inTransaction, type DbClient } from "../../infrastructure/database";
-import { getSystemAccountId } from "./system-accounts";
+import { insertPostedTransaction } from "../transactions/transaction.repository";
+import { reverseWithClient } from "../transactions/transaction.service";
+import { resolveSystemEquityAccountId } from "./system-accounts";
 import type { CreateAccountInput, UpdateAccountInput } from "./account.schemas";
 
 const accountProjection = `
   a.id,a.book_id AS "bookId",a.contact_id AS "contactId",a.name,
   a.account_type_id AS "accountTypeId",at.name AS "accountTypeName",at.icon AS "accountTypeIcon",
+  at.is_investment AS "isInvestment",
   a.normal_balance AS "normalBalance",
   a.currency_code AS "currencyCode",a.allow_negative_balance AS "allowNegativeBalance",
   a.credit_limit::text AS "creditLimit",a.is_archived AS "isArchived",
@@ -14,18 +17,43 @@ const accountProjection = `
   balances.balance::text AS balance,
   (CASE WHEN a.normal_balance='CREDIT' THEN -balances.balance ELSE balances.balance END)::text AS "displayBalance",
   (CASE
+    WHEN a.currency_code='TRY'
+      THEN (CASE WHEN a.normal_balance='CREDIT' THEN -balances.balance ELSE balances.balance END)
+    ELSE ROUND((CASE WHEN a.normal_balance='CREDIT' THEN -balances.balance ELSE balances.balance END)*COALESCE(fx.try_rate,0),2)
+  END)::text AS "displayBalanceTry",
+  (CASE
     WHEN a.credit_limit IS NULL THEN NULL
     WHEN a.normal_balance='CREDIT' THEN a.credit_limit-balances.balance
     ELSE a.credit_limit+balances.balance
-  END)::text AS "availableCredit"`;
+  END)::text AS "availableCredit",
+  COALESCE((
+    SELECT e.amount
+    FROM transaction_entries e
+    JOIN transactions t ON t.id=e.transaction_id
+    WHERE e.account_id=a.id AND t.account_id=a.id
+      AND t.transaction_type='OPENING_BALANCE' AND t.status='POSTED' AND t.deleted_at IS NULL
+    ORDER BY t.transaction_date DESC,t.transaction_no DESC LIMIT 1
+  ),0)::text AS "openingBalance"`;
 
 const typeJoin = `JOIN account_types at ON at.id=a.account_type_id`;
 
+// Latest TCMB rate for the account's currency; only joined for non-TRY accounts
+// so displayBalanceTry can express a foreign balance in the book base currency.
+const fxRateJoin = `
+  LEFT JOIN LATERAL (
+    SELECT try_rate FROM currency_daily_rates
+    WHERE currency_code=a.currency_code ORDER BY rate_date DESC LIMIT 1
+  ) fx ON a.currency_code<>'TRY'`;
+
+// An account's balance is reconstructed in its own currency (e.amount); the
+// book-base-currency (base_amount) figure is only used for cross-currency
+// rollups. amount == base_amount for every single-currency transaction, so this
+// is unchanged for TRY-only books.
 const balanceJoin = `
   LEFT JOIN LATERAL (
     SELECT CASE WHEN a.normal_balance='DEBIT'
-      THEN COALESCE(SUM(CASE WHEN e.direction='DEBIT' THEN e.base_amount ELSE -e.base_amount END),0)
-      ELSE COALESCE(SUM(CASE WHEN e.direction='CREDIT' THEN e.base_amount ELSE -e.base_amount END),0)
+      THEN COALESCE(SUM(CASE WHEN e.direction='DEBIT' THEN e.amount ELSE -e.amount END),0)
+      ELSE COALESCE(SUM(CASE WHEN e.direction='CREDIT' THEN e.amount ELSE -e.amount END),0)
     END AS balance
     FROM transaction_entries e
     JOIN transactions t ON t.id=e.transaction_id AND t.status IN ('POSTED','REVERSED')
@@ -35,7 +63,7 @@ const balanceJoin = `
 export async function listAccounts(client: DbClient, bookId: string, includeArchived = false) {
   const result = await client.query(
     `SELECT ${accountProjection}
-     FROM accounts a ${typeJoin} ${balanceJoin}
+     FROM accounts a ${typeJoin} ${balanceJoin} ${fxRateJoin}
      WHERE a.book_id=$1 AND a.deleted_at IS NULL AND a.is_system=false
        AND ($2::boolean OR a.is_archived=false)
      ORDER BY a.sort_order,a.name`,
@@ -46,7 +74,7 @@ export async function listAccounts(client: DbClient, bookId: string, includeArch
 
 export async function getAccountBalance(client: DbClient, accountId: string) {
   const result = await client.query(
-    `SELECT ${accountProjection} FROM accounts a ${typeJoin} ${balanceJoin}
+    `SELECT ${accountProjection} FROM accounts a ${typeJoin} ${balanceJoin} ${fxRateJoin}
      WHERE a.id=$1 AND a.deleted_at IS NULL`,
     [accountId],
   );
@@ -71,6 +99,13 @@ export async function createAccount(client: DbClient, userId: string, input: Cre
     if (!allowNegativeBalance && input.creditLimit != null) {
       throw new AppError(422, "CREDIT_LIMIT_REQUIRES_OVERDRAFT", "Credit limit requires negative balance permission");
     }
+    if (input.currencyCode !== "TRY") {
+      const enabled = await transaction.query(
+        `SELECT 1 FROM book_currencies WHERE book_id=$1 AND currency_code=$2`,
+        [input.bookId, input.currencyCode],
+      );
+      if (!enabled.rowCount) throw new AppError(422, "CURRENCY_NOT_ENABLED", "Enable this currency for the book before opening an account in it");
+    }
 
     const inserted = await transaction.query<{ id: string }>(
       `INSERT INTO accounts(
@@ -82,7 +117,7 @@ export async function createAccount(client: DbClient, userId: string, input: Cre
     const accountId = inserted.rows[0]!.id;
 
     if (Money.parse(input.openingBalance).isPositive()) {
-      const equityAccountId = await getSystemAccountId(transaction, input.bookId, "SYSTEM_EQUITY");
+      const equityAccountId = await resolveSystemEquityAccountId(transaction, input.bookId, input.currencyCode);
       const posted = await transaction.query<{ id: string }>(
         `INSERT INTO transactions(
            book_id,transaction_type,account_id,title,transaction_date,status,currency_code,client_operation_id,created_by
@@ -108,21 +143,97 @@ export async function createAccount(client: DbClient, userId: string, input: Cre
   });
 }
 
+/**
+ * Brings the account's opening balance to `amount`. Ledger entries are immutable
+ * once posted, so an existing opening posting is reversed (limits not enforced on
+ * the reversal itself) and a fresh one is posted at the original date. The new
+ * posting runs the normal balance-rule check, so lowering the opening balance
+ * below what has already been spent from a no-overdraft account is rejected and
+ * the whole update rolls back. A no-op when the amount is unchanged.
+ */
+async function applyOpeningBalanceChange(
+  client: DbClient,
+  userId: string,
+  params: {
+    bookId: string;
+    accountId: string;
+    accountName: string;
+    currencyCode: string;
+    normalBalance: "DEBIT" | "CREDIT";
+    amount: string;
+  },
+) {
+  const current = await client.query<{ id: string; amount: string; transaction_date: string }>(
+    `SELECT t.id, e.amount::text AS amount, t.transaction_date
+     FROM transactions t
+     JOIN transaction_entries e ON e.transaction_id=t.id AND e.account_id=$1
+     WHERE t.account_id=$1 AND t.transaction_type='OPENING_BALANCE'
+       AND t.status='POSTED' AND t.deleted_at IS NULL
+     ORDER BY t.transaction_date DESC, t.transaction_no DESC LIMIT 1`,
+    [params.accountId],
+  );
+  const existingOpening = current.rows[0];
+  if (Money.parse(params.amount).equals(Money.parse(existingOpening?.amount ?? "0"))) return;
+
+  if (existingOpening) {
+    await reverseWithClient(
+      client, userId, params.bookId, existingOpening.id, crypto.randomUUID(),
+      "Açılış bakiyesi güncellendi", false,
+    );
+  }
+  if (!Money.parse(params.amount).isPositive()) return;
+
+  const equityAccountId = await resolveSystemEquityAccountId(client, params.bookId, params.currencyCode);
+  const accountDirection = params.normalBalance === "DEBIT" ? "DEBIT" : "CREDIT";
+  const equityDirection = accountDirection === "DEBIT" ? "CREDIT" : "DEBIT";
+  const transactionDate = new Date(existingOpening?.transaction_date ?? Date.now()).toISOString();
+  await insertPostedTransaction(
+    client, userId,
+    {
+      bookId: params.bookId,
+      type: "OPENING_BALANCE",
+      accountId: params.accountId,
+      title: `${params.accountName} açılış bakiyesi`,
+      amount: params.amount,
+      currencyCode: params.currencyCode,
+      transactionDate,
+      clientOperationId: crypto.randomUUID(),
+    },
+    [
+      { accountId: params.accountId, direction: accountDirection, amount: params.amount, currencyCode: params.currencyCode, baseAmount: params.amount },
+      { accountId: equityAccountId, direction: equityDirection, amount: params.amount, currencyCode: params.currencyCode, baseAmount: params.amount },
+    ],
+  );
+}
+
 export async function updateAccount(client: DbClient, userId: string, accountId: string, input: UpdateAccountInput) {
   return inTransaction(client, async (transaction) => {
     const locked = await transaction.query<{
       book_id: string;
+      name: string;
       account_type_id: string;
       normal_balance: "DEBIT" | "CREDIT";
+      currency_code: string;
       allow_negative_balance: boolean;
       credit_limit: string | null;
     }>(
-      `SELECT book_id,account_type_id,normal_balance,allow_negative_balance,credit_limit::text
+      `SELECT book_id,name,account_type_id,normal_balance,currency_code,allow_negative_balance,credit_limit::text
        FROM accounts WHERE id=$1 AND deleted_at IS NULL AND is_system=false FOR UPDATE`,
       [accountId],
     );
     const existing = locked.rows[0];
     if (!existing) throw new AppError(404, "ACCOUNT_NOT_FOUND", "Account was not found");
+
+    if (input.openingBalance !== undefined) {
+      await applyOpeningBalanceChange(transaction, userId, {
+        bookId: existing.book_id,
+        accountId,
+        accountName: input.name?.trim() || existing.name,
+        currencyCode: existing.currency_code,
+        normalBalance: existing.normal_balance,
+        amount: input.openingBalance,
+      });
+    }
 
     const accountTypeId = input.accountTypeId ?? existing.account_type_id;
     const type = await assertAccountType(transaction, existing.book_id, accountTypeId);
@@ -134,8 +245,8 @@ export async function updateAccount(client: DbClient, userId: string, accountId:
     }
     const balanceResult = await transaction.query<{ balance: string }>(
       `SELECT CASE WHEN $2='DEBIT'
-         THEN COALESCE(SUM(CASE WHEN e.direction='DEBIT' THEN e.base_amount ELSE -e.base_amount END),0)
-         ELSE COALESCE(SUM(CASE WHEN e.direction='CREDIT' THEN e.base_amount ELSE -e.base_amount END),0)
+         THEN COALESCE(SUM(CASE WHEN e.direction='DEBIT' THEN e.amount ELSE -e.amount END),0)
+         ELSE COALESCE(SUM(CASE WHEN e.direction='CREDIT' THEN e.amount ELSE -e.amount END),0)
        END::text AS balance
        FROM transaction_entries e JOIN transactions t ON t.id=e.transaction_id AND t.status IN ('POSTED','REVERSED')
        WHERE e.account_id=$1`,

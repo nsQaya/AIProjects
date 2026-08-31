@@ -421,7 +421,10 @@ export function SettingsPage({
                 <div key={item.id}>
                   <span>
                     <b>{item.name}</b>
-                    <small>{item.isActive ? "Aktif" : "Pasif"}</small>
+                    <small>
+                      {item.isActive ? "Aktif" : "Pasif"}
+                      {item.isInvestment ? " · Yatırım hesabı" : ""}
+                    </small>
                   </span>
                   <span className="row-actions">
                     <button
@@ -590,7 +593,7 @@ export function SettingsPage({
               const datedPrice=datedPriceMap.get(item.id);
               const latestPriceText=priceLoading&&!datedPrice
                 ? "Fiyat yükleniyor…"
-                : `${moneyInCurrency(datedPrice?.price??0,item.currencyCode)} · ${datedPrice?.available?(datedPrice.source==="YAHOO"?"Yahoo kapanış":"Manuel fiyat"):"O gün fiyat yok"}`;
+                : `${moneyInCurrency(datedPrice?.price??0,item.currencyCode)} · ${datedPrice?.available?(datedPrice.source==="MANUAL"?"Manuel fiyat":datedPrice.source==="YAHOO_LIVE"?"Yahoo anlık":"Yahoo kapanış"):"O gün fiyat yok"}`;
               const deleteKey = `delete-instrument:${item.id}`;
               const activateKey = `activate-instrument:${item.id}`;
               return (

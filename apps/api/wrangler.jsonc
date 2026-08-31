@@ -18,7 +18,7 @@
     "producers": [{ "binding": "JOBS", "queue": "defterx-jobs" }],
     "consumers": [{ "queue": "defterx-jobs", "max_batch_size": 10, "max_batch_timeout": 5, "max_retries": 3, "max_concurrency": 2 }]
   },
-  "triggers": { "crons": ["*/15 * * * *", "5 3 * * 1", "30 22 * * 2-6", "0 13 * * 2-6"] },
+  "triggers": { "crons": ["*/15 * * * *", "5 3 * * 1", "30 22 * * 2-6", "0 13 * * 2-6", "0 7-21 * * 1-5"] },
   "placement": { "mode": "smart" },
   "observability": { "enabled": true, "head_sampling_rate": 0.1 }
 }

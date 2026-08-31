@@ -298,6 +298,91 @@
   gap: 16px;
 }
 
+.net-worth-treemap-panel .report-chart {
+  width: 100%;
+}
+
+.report-net-worth-note {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+}
+
+.report-net-worth-note .negative {
+  color: var(--red);
+  font-variant-numeric: tabular-nums;
+}
+
+.export-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.export-menu > summary {
+  min-height: 34px;
+  padding: 0 12px 0 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 700;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: white;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.export-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.export-menu > summary::after {
+  content: "⌄";
+  color: var(--muted);
+}
+
+.export-menu[open] > summary {
+  border-color: var(--forest-700);
+  color: var(--forest-700);
+}
+
+.export-menu-options {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 5px);
+  z-index: 14;
+  display: flex;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: white;
+  box-shadow: 0 12px 30px rgba(16, 35, 26, .16);
+  overflow: hidden;
+}
+
+.export-menu-options button {
+  min-height: 36px;
+  padding: 0 16px;
+  border: 0;
+  background: white;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.export-menu-options button + button {
+  border-left: 1px solid var(--line);
+}
+
+.export-menu-options button:hover {
+  background: var(--green-soft);
+  color: var(--forest-700);
+}
+
 @media (max-width: 620px) {
   .report-filter-bar > .date-filter,
   .report-filter-bar > .report-account-filter,

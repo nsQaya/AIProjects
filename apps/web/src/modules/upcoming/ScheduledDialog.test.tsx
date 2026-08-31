@@ -12,6 +12,7 @@ const accounts = ["Banka", "Nakit"].map((name, index) => ({
   accountTypeId: "type-bank",
   accountTypeName: "Banka",
   accountTypeIcon: null,
+  isInvestment: false,
   normalBalance: "DEBIT" as const,
   currencyCode: "TRY",
   allowNegativeBalance: false,
@@ -21,6 +22,8 @@ const accounts = ["Banka", "Nakit"].map((name, index) => ({
   version: 1,
   balance: "0",
   displayBalance: "0",
+  displayBalanceTry: "0",
+  openingBalance: "0",
   availableCredit: null,
   ui: { balance: 0, displayBalance: 0, creditLimit: null, availableCredit: null },
 })) satisfies AccountView[];

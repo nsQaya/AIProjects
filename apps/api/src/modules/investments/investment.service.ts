@@ -1,9 +1,9 @@
 import { AppError } from "../../common/errors";
 import { inTransaction, type DbClient } from "../../infrastructure/database";
 import { createTransactionWithClient,reverseWithClient } from "../transactions/transaction.service";
-import { getSystemAccountId } from "../accounts/system-accounts";
+import { resolveSystemEquityAccountId } from "../accounts/system-accounts";
 import type {
-  CreateAssetTypeInput,CreateInstrumentInput,CreateLotInput,CreatePriceInput,CreateSaleInput,
+  CreateAssetTypeInput,CreateCapitalIncreaseInput,CreateInstrumentInput,CreateLotInput,CreatePriceInput,CreateSaleInput,
   UpdateAssetTypeInput,UpdateInstrumentInput,UpdateLotInput,UpdateSaleInput,
 } from "./investment.schemas";
 
@@ -32,7 +32,8 @@ const fxValue = (expression:string) => `CASE WHEN i.currency_code='TRY' THEN ${e
 const lotProjection = `l.id,l.book_id AS "bookId",l.instrument_id AS "instrumentId",i.name AS "instrumentName",i.symbol,
   i.currency_code AS "currencyCode",
   l.account_id AS "accountId",a.name AS "accountName",l.quantity::text,l.unit_price::text AS "unitPrice",
-  (l.quantity*l.unit_price)::text AS "costBasis",l.purchased_at AS "purchasedAt",l.notes,l.version`;
+  (l.quantity*l.unit_price)::text AS "costBasis",l.purchased_at AS "purchasedAt",l.notes,l.kind,
+  (l.transaction_id IS NOT NULL) AS posted,l.version`;
 const saleProjection = `s.id,s.book_id AS "bookId",s.instrument_id AS "instrumentId",i.name AS "instrumentName",i.symbol,
   i.currency_code AS "currencyCode",
   s.destination_account_id AS "destinationAccountId",a.name AS "destinationAccountName",s.transaction_id AS "transactionId",
@@ -172,14 +173,93 @@ export async function listLots(client:DbClient,bookId:string){
   return {items:result.rows};
 }
 
+/** Latest known TCMB rate (TRY per unit) for a currency; "1" for TRY. Throws when a foreign rate was never synced. */
+async function latestTryRate(client:DbClient,currencyCode:string){
+  if(currencyCode==="TRY")return "1";
+  const result=await client.query<{try_rate:string}>(
+    `SELECT try_rate::text FROM currency_daily_rates WHERE currency_code=$1 ORDER BY rate_date DESC LIMIT 1`,
+    [currencyCode],
+  );
+  if(!result.rows[0])throw new AppError(422,"CURRENCY_RATE_MISSING",`No exchange rate is available for ${currencyCode} yet`);
+  return result.rows[0].try_rate;
+}
+
+/**
+ * Posts the cash side of money moving into an instrument position (a purchase or
+ * a paid capital increase): the brokerage account is credited by `cost` and the
+ * SYSTEM_EQUITY account of that currency is debited, so the book's cash total
+ * drops. The instrument and the brokerage account must share a currency; the
+ * ledger's base_amount records the TRY value at the latest rate. Returns the
+ * transaction id.
+ */
+async function postInstrumentCashOut(
+  client:DbClient,userId:string,
+  params:{bookId:string;instrumentId:string;accountId:string;cost:string;transactionDate:string;title:string;description:string},
+){
+  const meta=await client.query<{instrument_currency:string;account_currency:string}>(
+    `SELECT i.currency_code AS instrument_currency,a.currency_code AS account_currency
+     FROM investment_instruments i
+     JOIN accounts a ON a.id=$2
+     WHERE i.id=$1 AND i.book_id=$3`,
+    [params.instrumentId,params.accountId,params.bookId],
+  );
+  const row=meta.rows[0];
+  if(!row)throw new AppError(422,"INVESTMENT_INSTRUMENT_INVALID","Investment instrument is unavailable");
+  if(row.instrument_currency!==row.account_currency){
+    throw new AppError(422,"INVESTMENT_CURRENCY_MISMATCH","Yatırım aracı ile aracı kurum hesabı aynı para biriminde olmalı");
+  }
+  const equityAccountId=await resolveSystemEquityAccountId(client,params.bookId,row.instrument_currency);
+  const baseAmount=await baseValue(client,params.cost,row.instrument_currency);
+  const posted=await createTransactionWithClient(client,userId,{
+    bookId:params.bookId,type:"ADJUSTMENT",title:params.title,
+    amount:params.cost,currencyCode:row.instrument_currency,baseAmount,
+    accountId:equityAccountId,targetAccountId:params.accountId,
+    transactionDate:params.transactionDate,clientOperationId:crypto.randomUUID(),
+    description:params.description,
+  });
+  return posted.id as string;
+}
+
+/** TRY value of `amount` in `currencyCode` at the latest rate, rounded to money precision. */
+async function baseValue(client:DbClient,amount:string,currencyCode:string){
+  if(currencyCode==="TRY")return amount;
+  const rate=await latestTryRate(client,currencyCode);
+  const result=await client.query<{base:string}>(`SELECT ROUND($1::numeric*$2::numeric,6)::text AS base`,[amount,rate]);
+  return result.rows[0]!.base;
+}
+
+/** Purchase-flavoured wrapper over postInstrumentCashOut: derives the lot cost and the title. */
+async function postPurchase(
+  client:DbClient,userId:string,
+  params:{bookId:string;instrumentId:string;accountId:string;quantity:string;unitPrice:string;purchasedAt:string;notes?:string|null},
+){
+  const meta=await client.query<{name:string;cost:string}>(
+    `SELECT i.name,ROUND($2::numeric*$3::numeric,6)::text AS cost
+     FROM investment_instruments i WHERE i.id=$1 AND i.book_id=$4`,
+    [params.instrumentId,params.quantity,params.unitPrice,params.bookId],
+  );
+  if(!meta.rows[0])throw new AppError(422,"INVESTMENT_INSTRUMENT_INVALID","Investment instrument is unavailable");
+  return postInstrumentCashOut(client,userId,{
+    bookId:params.bookId,instrumentId:params.instrumentId,accountId:params.accountId,
+    cost:meta.rows[0].cost,transactionDate:params.purchasedAt,
+    title:`Birikim alımı: ${meta.rows[0].name}`,description:params.notes??"Birikim alım bedeli",
+  });
+}
+
 export async function createLot(client:DbClient,userId:string,input:CreateLotInput){
   return inTransaction(client,async transaction=>{
     await transaction.query(`SELECT pg_advisory_xact_lock(hashtext($1))`,[input.instrumentId]);
     await assertInvestmentScope(transaction,input.bookId,input.instrumentId,input.accountId);
+    const transactionId=input.accountId
+      ? await postPurchase(transaction,userId,{
+          bookId:input.bookId,instrumentId:input.instrumentId,accountId:input.accountId,
+          quantity:input.quantity,unitPrice:input.unitPrice,purchasedAt:input.purchasedAt,notes:input.notes,
+        })
+      : null;
     const inserted=await transaction.query<{id:string}>(
-      `INSERT INTO investment_lots(book_id,instrument_id,account_id,quantity,unit_price,purchased_at,notes)
-       VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-      [input.bookId,input.instrumentId,input.accountId??null,input.quantity,input.unitPrice,input.purchasedAt,input.notes??null],
+      `INSERT INTO investment_lots(book_id,instrument_id,account_id,quantity,unit_price,purchased_at,notes,transaction_id)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+      [input.bookId,input.instrumentId,input.accountId??null,input.quantity,input.unitPrice,input.purchasedAt,input.notes??null,transactionId],
     );
     const value=(await findLot(transaction,inserted.rows[0]!.id))!;
     await audit(transaction,input.bookId,userId,"INVESTMENT_LOT",value.id,"CREATE",value);
@@ -189,18 +269,40 @@ export async function createLot(client:DbClient,userId:string,input:CreateLotInp
 
 export async function updateLot(client:DbClient,userId:string,id:string,input:UpdateLotInput){
   return inTransaction(client,async transaction=>{
-    const found=await transaction.query<{book_id:string;instrument_id:string;account_id:string|null}>(`SELECT book_id,instrument_id,account_id FROM investment_lots WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`,[id]);
+    const found=await transaction.query<{
+      book_id:string;instrument_id:string;account_id:string|null;transaction_id:string|null;kind:string;
+      quantity:string;unit_price:string;purchased_at:string;notes:string|null;
+    }>(
+      `SELECT book_id,instrument_id,account_id,transaction_id,kind,quantity::text,unit_price::text,purchased_at::text,notes
+       FROM investment_lots WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`,[id],
+    );
     const current=found.rows[0];
     if(!current)throw new AppError(404,"INVESTMENT_LOT_NOT_FOUND","Investment lot was not found");
+    if(current.kind==="CAPITAL_INCREASE")throw new AppError(422,"CAPITAL_INCREASE_IMMUTABLE","Sermaye artırımı kaydı düzenlenemez; silip yeniden ekleyin");
     await transaction.query(`SELECT pg_advisory_xact_lock(hashtext($1))`,[current.instrument_id]);
     await assertLotHistoryEditable(transaction,current.instrument_id);
-    await assertInvestmentScope(transaction,current.book_id,input.instrumentId??current.instrument_id,input.accountId===undefined?current.account_id:input.accountId);
+    const nextInstrumentId=input.instrumentId??current.instrument_id;
+    const nextAccountId=input.accountId===undefined?current.account_id:input.accountId;
+    await assertInvestmentScope(transaction,current.book_id,nextInstrumentId,nextAccountId);
+    // Rebuild the cash posting from the resolved new state: drop the old one,
+    // then post a fresh purchase if the lot still points at a brokerage account.
+    if(current.transaction_id){
+      await reverseWithClient(transaction,userId,current.book_id,current.transaction_id,crypto.randomUUID(),"Birikim alımı düzeltildi",false);
+    }
+    const nextTransactionId=nextAccountId
+      ? await postPurchase(transaction,userId,{
+          bookId:current.book_id,instrumentId:nextInstrumentId,accountId:nextAccountId,
+          quantity:input.quantity??current.quantity,unitPrice:input.unitPrice??current.unit_price,
+          purchasedAt:input.purchasedAt??current.purchased_at,
+          notes:input.notes!==undefined?input.notes:current.notes,
+        })
+      : null;
     const result=await transaction.query(
       `UPDATE investment_lots SET instrument_id=COALESCE($2,instrument_id),account_id=CASE WHEN $3::boolean THEN $4 ELSE account_id END,
        quantity=COALESCE($5,quantity),unit_price=COALESCE($6,unit_price),purchased_at=COALESCE($7,purchased_at),
-       notes=CASE WHEN $8::boolean THEN $9 ELSE notes END,updated_at=now(),version=version+1
+       notes=CASE WHEN $8::boolean THEN $9 ELSE notes END,transaction_id=$11,updated_at=now(),version=version+1
        WHERE id=$1 AND version=$10 RETURNING id`,
-      [id,input.instrumentId??null,input.accountId!==undefined,input.accountId??null,input.quantity??null,input.unitPrice??null,input.purchasedAt??null,input.notes!==undefined,input.notes??null,input.version],
+      [id,input.instrumentId??null,input.accountId!==undefined,input.accountId??null,input.quantity??null,input.unitPrice??null,input.purchasedAt??null,input.notes!==undefined,input.notes??null,input.version,nextTransactionId],
     );
     if(!result.rows[0])throw new AppError(409,"VERSION_CONFLICT","Investment lot changed on another device");
     const value=(await findLot(transaction,id))!;
@@ -211,15 +313,103 @@ export async function updateLot(client:DbClient,userId:string,id:string,input:Up
 
 export async function deleteLot(client:DbClient,userId:string,id:string,version:number){
   return inTransaction(client,async transaction=>{
-    const found=await transaction.query<{book_id:string;instrument_id:string}>(`SELECT book_id,instrument_id FROM investment_lots WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`,[id]);
+    const found=await transaction.query<{book_id:string;instrument_id:string;transaction_id:string|null;kind:string;purchased_at:string}>(`SELECT book_id,instrument_id,transaction_id,kind,purchased_at::text FROM investment_lots WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`,[id]);
     if(!found.rows[0])throw new AppError(404,"INVESTMENT_LOT_NOT_FOUND","Investment lot was not found");
     await transaction.query(`SELECT pg_advisory_xact_lock(hashtext($1))`,[found.rows[0].instrument_id]);
-    await assertLotHistoryEditable(transaction,found.rows[0].instrument_id);
+    if(found.rows[0].kind==="CAPITAL_INCREASE"){
+      // A capital increase can be removed until a sale has consumed the shares it
+      // added; a sale before it never used its cost, so an earlier sale is fine.
+      const laterSale=await transaction.query(`SELECT 1 FROM investment_sales WHERE instrument_id=$1 AND deleted_at IS NULL AND sold_at>=$2 LIMIT 1`,[found.rows[0].instrument_id,found.rows[0].purchased_at]);
+      if(laterSale.rowCount)throw new AppError(409,"INVESTMENT_HISTORY_LOCKED","Bu sermaye artışından sonra satış yapılmış; kaydı silmek geçmiş maliyeti bozar");
+    }else{
+      await assertLotHistoryEditable(transaction,found.rows[0].instrument_id);
+    }
+    if(found.rows[0].transaction_id){
+      await reverseWithClient(transaction,userId,found.rows[0].book_id,found.rows[0].transaction_id,crypto.randomUUID(),found.rows[0].kind==="CAPITAL_INCREASE"?"Sermaye artırımı silindi":"Birikim alımı silindi",false);
+    }
     const result=await transaction.query(`UPDATE investment_lots SET deleted_at=now(),updated_at=now(),version=version+1 WHERE id=$1 AND version=$2 RETURNING id,true AS deleted,version`,[id,version]);
     if(!result.rows[0])throw new AppError(409,"VERSION_CONFLICT","Investment lot changed on another device");
     await audit(transaction,found.rows[0].book_id,userId,"INVESTMENT_LOT",id,"DELETE",result.rows[0]);
     return result.rows[0];
   });
+}
+
+/**
+ * Records a bonus issue, a rights issue or a manual split as a CAPITAL_INCREASE
+ * lot: `quantity` is how many units the position grew by, `unit_price` spreads
+ * `amountPaid` over them (0 for a bonus issue / split). A paid increase also
+ * posts the cash leaving the brokerage account.
+ */
+export async function createCapitalIncrease(client:DbClient,userId:string,input:CreateCapitalIncreaseInput){
+  return inTransaction(client,async transaction=>{
+    await transaction.query(`SELECT pg_advisory_xact_lock(hashtext($1))`,[input.instrumentId]);
+    await assertInvestmentScope(transaction,input.bookId,input.instrumentId,input.accountId);
+    const instrument=await transaction.query<{name:string}>(
+      `SELECT name FROM investment_instruments WHERE id=$1 AND book_id=$2 AND deleted_at IS NULL`,
+      [input.instrumentId,input.bookId],
+    );
+    if(!instrument.rows[0])throw new AppError(422,"INVESTMENT_INSTRUMENT_INVALID","Investment instrument is unavailable");
+    const paid=Number(input.amountPaid)>0;
+    if(paid&&!input.accountId)throw new AppError(422,"ACCOUNT_REQUIRED_FOR_PAID_INCREASE","Bedelli sermaye artışında ödemenin çıktığı aracı kurum hesabı seçilmeli");
+    const derived=await transaction.query<{delta:string;unit_price:string;enough:boolean}>(
+      `WITH position AS (
+         SELECT
+           COALESCE((SELECT SUM(quantity) FROM investment_lots WHERE book_id=$1 AND instrument_id=$2 AND deleted_at IS NULL),0)
+           -COALESCE((SELECT SUM(quantity) FROM investment_sales WHERE book_id=$1 AND instrument_id=$2 AND deleted_at IS NULL),0) AS open_qty
+       )
+       SELECT ($3::numeric-open_qty)::text AS delta,
+              $3::numeric-open_qty > 0 AS enough,
+              CASE WHEN $3::numeric-open_qty > 0
+                   THEN ROUND($4::numeric/($3::numeric-open_qty),6)::text ELSE '0' END AS unit_price
+       FROM position`,
+      [input.bookId,input.instrumentId,input.newTotalQuantity,input.amountPaid],
+    );
+    const row=derived.rows[0]!;
+    if(!row.enough)throw new AppError(422,"CAPITAL_INCREASE_NOT_POSITIVE","Yeni toplam adet mevcut açık pozisyondan büyük olmalı");
+    const transactionId=paid
+      ? await postInstrumentCashOut(transaction,userId,{
+          bookId:input.bookId,instrumentId:input.instrumentId,accountId:input.accountId!,
+          cost:input.amountPaid,transactionDate:input.effectiveAt,
+          title:`Sermaye artırımı: ${instrument.rows[0].name}`,description:input.notes??"Bedelli sermaye artışı",
+        })
+      : null;
+    const inserted=await transaction.query<{id:string}>(
+      `INSERT INTO investment_lots(book_id,instrument_id,account_id,quantity,unit_price,purchased_at,notes,kind,transaction_id)
+       VALUES($1,$2,$3,$4,$5,$6,$7,'CAPITAL_INCREASE',$8) RETURNING id`,
+      [input.bookId,input.instrumentId,input.accountId??null,row.delta,row.unit_price,input.effectiveAt,input.notes??null,transactionId],
+    );
+    const value=(await findLot(transaction,inserted.rows[0]!.id))!;
+    await audit(transaction,input.bookId,userId,"INVESTMENT_LOT",value.id,"CAPITAL_INCREASE",value);
+    return value;
+  });
+}
+
+/** Investment-type accounts with their parked cash, in the account's own currency and in TRY. */
+export async function listBrokerageAccounts(client:DbClient,bookId:string){
+  const result=await client.query(
+    `SELECT a.id,a.name,a.currency_code AS "currencyCode",a.is_archived AS "isArchived",
+       bal.display::text AS "displayBalance",
+       (CASE WHEN a.currency_code='TRY' THEN bal.display
+             ELSE ROUND(bal.display*COALESCE(fx.try_rate,0),2) END)::text AS "displayBalanceTry"
+     FROM accounts a
+     JOIN account_types t ON t.id=a.account_type_id
+     LEFT JOIN LATERAL (
+       SELECT (CASE WHEN a.normal_balance='CREDIT'
+         THEN COALESCE(SUM(CASE WHEN e.direction='CREDIT' THEN e.amount ELSE -e.amount END),0)
+         ELSE COALESCE(SUM(CASE WHEN e.direction='DEBIT' THEN e.amount ELSE -e.amount END),0)
+       END) AS display
+       FROM transaction_entries e
+       JOIN transactions tr ON tr.id=e.transaction_id AND tr.status IN ('POSTED','REVERSED')
+       WHERE e.account_id=a.id
+     ) bal ON true
+     LEFT JOIN LATERAL (
+       SELECT try_rate FROM currency_daily_rates WHERE currency_code=a.currency_code ORDER BY rate_date DESC LIMIT 1
+     ) fx ON a.currency_code<>'TRY'
+     WHERE a.book_id=$1 AND a.is_system=false AND a.deleted_at IS NULL AND t.is_investment=true
+     ORDER BY a.is_archived,a.sort_order,a.name`,
+    [bookId],
+  );
+  return {items:result.rows};
 }
 
 export async function portfolio(client:DbClient,bookId:string){
@@ -280,10 +470,11 @@ export async function createSale(client:DbClient,userId:string,input:CreateSaleI
       [input.instrumentId,input.bookId],
     );
     const values=await saleValues(transaction,input.bookId,input.instrumentId,input.quantity,input.unitPrice);
-    const equityAccountId=await getSystemAccountId(transaction,input.bookId,"SYSTEM_EQUITY");
+    const saleCurrency=instrument.rows[0]!.currency_code;
+    const equityAccountId=await resolveSystemEquityAccountId(transaction,input.bookId,saleCurrency);
     const posted=await createTransactionWithClient(transaction,userId,{
       bookId:input.bookId,type:"ADJUSTMENT",title:`Birikim satışı: ${instrument.rows[0]!.name}`,
-      amount:values.proceeds,currencyCode:instrument.rows[0]!.currency_code,
+      amount:values.proceeds,currencyCode:saleCurrency,baseAmount:await baseValue(transaction,values.proceeds,saleCurrency),
       accountId:input.destinationAccountId,targetAccountId:equityAccountId,
       transactionDate:input.soldAt,clientOperationId:input.clientOperationId,
       description:input.notes??"Birikim satış bedeli",
@@ -313,11 +504,12 @@ export async function updateSale(client:DbClient,userId:string,id:string,input:U
       `SELECT name,currency_code FROM investment_instruments WHERE id=$1 AND book_id=$2 AND deleted_at IS NULL`,[input.instrumentId,current.book_id],
     );
     const values=await saleValues(transaction,current.book_id,input.instrumentId,input.quantity,input.unitPrice,id);
-    const equityAccountId=await getSystemAccountId(transaction,current.book_id,"SYSTEM_EQUITY");
+    const saleCurrency=instrument.rows[0]!.currency_code;
+    const equityAccountId=await resolveSystemEquityAccountId(transaction,current.book_id,saleCurrency);
     await reverseWithClient(transaction,userId,current.book_id,current.transaction_id,input.reversalClientOperationId,"Birikim satışı düzeltildi",false);
     const posted=await createTransactionWithClient(transaction,userId,{
       bookId:current.book_id,type:"ADJUSTMENT",title:`Birikim satışı: ${instrument.rows[0]!.name}`,
-      amount:values.proceeds,currencyCode:instrument.rows[0]!.currency_code,
+      amount:values.proceeds,currencyCode:saleCurrency,baseAmount:await baseValue(transaction,values.proceeds,saleCurrency),
       accountId:input.destinationAccountId,targetAccountId:equityAccountId,
       transactionDate:input.soldAt,clientOperationId:input.clientOperationId,
       description:input.notes??"Birikim satış bedeli",
@@ -423,11 +615,17 @@ async function resolveMarketSymbol(client:DbClient,id:string){
   return result.rows[0];
 }
 async function assertInvestmentScope(client:DbClient,bookId:string,instrumentId:string,accountId?:string|null){
-  const instrument=await client.query(`SELECT 1 FROM investment_instruments WHERE id=$1 AND book_id=$2 AND is_active=true AND deleted_at IS NULL`,[instrumentId,bookId]);
+  const instrument=await client.query<{currency_code:string}>(`SELECT currency_code FROM investment_instruments WHERE id=$1 AND book_id=$2 AND is_active=true AND deleted_at IS NULL`,[instrumentId,bookId]);
   if(!instrument.rowCount)throw new AppError(422,"INVESTMENT_INSTRUMENT_INVALID","Investment instrument is unavailable");
   if(accountId){
-    const account=await client.query(`SELECT 1 FROM accounts WHERE id=$1 AND book_id=$2 AND is_system=false AND is_archived=false AND deleted_at IS NULL`,[accountId,bookId]);
+    const account=await client.query<{is_investment:boolean;currency_code:string}>(
+      `SELECT t.is_investment,a.currency_code FROM accounts a JOIN account_types t ON t.id=a.account_type_id
+       WHERE a.id=$1 AND a.book_id=$2 AND a.is_system=false AND a.is_archived=false AND a.deleted_at IS NULL`,
+      [accountId,bookId],
+    );
     if(!account.rowCount)throw new AppError(422,"ACCOUNT_UNAVAILABLE","Investment account is unavailable");
+    if(!account.rows[0]!.is_investment)throw new AppError(422,"ACCOUNT_NOT_INVESTMENT","Account must be a brokerage (investment) account; mark its type as an investment account first");
+    if(account.rows[0]!.currency_code!==instrument.rows[0]!.currency_code)throw new AppError(422,"INVESTMENT_CURRENCY_MISMATCH","Aracı kurum hesabı ile yatırım aracı aynı para biriminde olmalı");
   }
 }
 async function assertLotHistoryEditable(client:DbClient,instrumentId:string){

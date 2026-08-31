@@ -12,6 +12,7 @@ const account = {
   accountTypeId: "00000000-0000-4000-8000-000000000091",
   accountTypeName: "Banka",
   accountTypeIcon: null,
+  isInvestment: false,
   normalBalance: "DEBIT",
   currencyCode: "TRY",
   allowNegativeBalance: false,
@@ -21,6 +22,8 @@ const account = {
   version: 1,
   balance: "0",
   displayBalance: "0",
+  displayBalanceTry: "0",
+  openingBalance: "0",
   availableCredit: null,
   ui: { balance: 0, displayBalance: 0, creditLimit: null, availableCredit: null },
 } satisfies AccountView;
@@ -201,6 +204,55 @@ describe("TransactionDialog", () => {
       expect(onSave).toHaveBeenCalledWith(
         expect.objectContaining({ amount: "1452.85" }),
         transaction,
+      );
+    });
+  });
+
+  it("seeds the form from a prefill and shows the overridden title", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <TransactionDialog
+        accounts={[account]}
+        categories={[category]}
+        costCenters={[costCenter]}
+        onClose={vi.fn()}
+        onSave={onSave}
+        open
+        transaction={null}
+        title="Planı gerçekleştir"
+        prefill={{
+          type: "EXPENSE",
+          title: "Aylık kira",
+          amount: "3500.000000",
+          accountId: account.id,
+          categoryId: category.id,
+          transactionDate: "2026-09-01T09:00:00.000Z",
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Planı gerçekleştir" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Açıklama")).toHaveValue("Aylık kira");
+    expect(screen.getByLabelText(/Tutar/)).toHaveValue("3500,000000");
+    expect(screen.getByLabelText("Tarih")).toHaveValue("2026-09-01");
+    expect(screen.getByLabelText("Kategori")).toHaveValue(category.id);
+
+    await user.clear(screen.getByLabelText(/Tutar/));
+    await user.type(screen.getByLabelText(/Tutar/), "3650,50");
+    await user.click(screen.getByRole("button", { name: "Kaydet" }));
+
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "EXPENSE",
+          title: "Aylık kira",
+          amount: "3650.5",
+          accountId: account.id,
+          categoryId: category.id,
+        }),
+        null,
       );
     });
   });

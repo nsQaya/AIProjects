@@ -7,6 +7,7 @@ export const createAccountTypeSchema = z.object({
   icon: z.string().trim().max(50).nullable().optional(),
   normalBalance: z.enum(["DEBIT", "CREDIT"]),
   defaultAllowNegativeBalance: z.boolean().default(false),
+  isInvestment: z.boolean().default(false),
   sortOrder: z.number().int().default(0),
 });
 
@@ -15,6 +16,7 @@ export const updateAccountTypeSchema = z.object({
   icon: z.string().trim().max(50).nullable().optional(),
   normalBalance: z.enum(["DEBIT", "CREDIT"]).optional(),
   defaultAllowNegativeBalance: z.boolean().optional(),
+  isInvestment: z.boolean().optional(),
   sortOrder: z.number().int().optional(),
   isActive: z.boolean().optional(),
   version,

@@ -90,6 +90,7 @@ function account(
     accountTypeId: `type-${accountTypeName.toLowerCase()}`,
     accountTypeName,
     accountTypeIcon: null,
+    isInvestment: false,
     normalBalance: "DEBIT",
     currencyCode: "TRY",
     allowNegativeBalance: false,
@@ -99,6 +100,8 @@ function account(
     version: 1,
     balance: "0",
     displayBalance: "0",
+    displayBalanceTry: "0",
+    openingBalance: "0",
     availableCredit: null,
     ui: {
       balance: 0,

@@ -29,7 +29,6 @@ const endpoints = {
   nasdaq: "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt",
   otherUs: "https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt",
   yahooChart: "https://query1.finance.yahoo.com/v8/finance/chart",
-  yahooSpark: "https://query1.finance.yahoo.com/v7/finance/spark",
 } as const;
 
 const requestHeaders = {
@@ -195,33 +194,21 @@ function priceFromChartResult(result: any, providerSymbol: string, targetDate: s
   };
 }
 
-function recentDate(targetDate: string): boolean {
-  const age = Date.now() - new Date(`${targetDate}T23:59:59Z`).getTime();
-  return age >= -86_400_000 && age <= 31 * 86_400_000;
-}
-
 export async function fetchYahooPrices(
   symbols: readonly string[],
   targetDate: string,
   fetcher: typeof fetch = fetch,
 ): Promise<{ failedSymbols: string[]; points: MarketPricePoint[] }> {
   if (symbols.length === 0) return { failedSymbols: [], points: [] };
-  if (recentDate(targetDate)) {
-    const url = new URL(endpoints.yahooSpark);
-    url.searchParams.set("symbols", symbols.join(","));
-    url.searchParams.set("range", "1mo");
-    url.searchParams.set("interval", "1d");
-    const payload = await yahooJson(url.toString(), fetcher);
-    const results: any[] = payload?.spark?.result ?? [];
-    const points = results.flatMap((item) => {
-      const point = priceFromChartResult(item?.response?.[0], String(item?.symbol ?? ""), targetDate);
-      return point ? [point] : [];
-    });
-    return { failedSymbols: [], points };
-  }
-
-  const start = Math.floor(new Date(`${targetDate}T00:00:00Z`).getTime() / 1000);
-  const end = start + 2 * 86_400;
+  // One chart request per symbol. We used to batch recent dates through the v7
+  // /spark endpoint, but now that a run only covers the codes someone actually
+  // tracks (not the ~13k-code catalog) the batching is unnecessary - and spark
+  // had started returning nothing for BIST, which is why those prices stopped
+  // updating. The window reaches a few days back so a non-trading targetDate
+  // still lands inside a returned range (priceFromChartResult matches the exact
+  // date, so the extra bars are harmless).
+  const start = Math.floor(new Date(`${targetDate}T00:00:00Z`).getTime() / 1000) - 7 * 86_400;
+  const end = Math.floor(new Date(`${targetDate}T00:00:00Z`).getTime() / 1000) + 2 * 86_400;
   const results = await Promise.allSettled(symbols.map(async (providerSymbol) => {
     const url = new URL(`${endpoints.yahooChart}/${encodeURIComponent(providerSymbol)}`);
     url.searchParams.set("period1", String(start));
@@ -238,6 +225,44 @@ export async function fetchYahooPrices(
     else if (result.value) points.push(result.value);
   });
   if (failedSymbols.length === symbols.length) throw new Error("Yahoo Finance price batch failed");
+  return { failedSymbols, points };
+}
+
+// The manual "update every price now" button wants a price on the screen
+// immediately, not tomorrow's official close. This reads the current intraday
+// quote (meta.regularMarketPrice) from the same chart endpoint and stamps it on
+// targetDate unconditionally - there is no "is there a bar for this day?" filter
+// like fetchYahooPrices has, so BIST codes get a value even mid-session or
+// before Yahoo has published the daily bar.
+export async function fetchYahooLivePrices(
+  symbols: readonly string[],
+  targetDate: string,
+  fetcher: typeof fetch = fetch,
+): Promise<{ failedSymbols: string[]; points: MarketPricePoint[] }> {
+  if (symbols.length === 0) return { failedSymbols: [], points: [] };
+  const results = await Promise.allSettled(symbols.map(async (providerSymbol) => {
+    const url = new URL(`${endpoints.yahooChart}/${encodeURIComponent(providerSymbol)}`);
+    url.searchParams.set("range", "1d");
+    url.searchParams.set("interval", "1d");
+    const payload = await yahooJson(url.toString(), fetcher);
+    const meta = payload?.chart?.result?.[0]?.meta;
+    const close = decimal(meta?.regularMarketPrice);
+    if (!close) return null;
+    return {
+      adjustedClose: null,
+      close,
+      currencyCode: String(meta?.currency ?? (providerSymbol.endsWith(".IS") ? "TRY" : "USD")).slice(0, 3),
+      priceDate: targetDate,
+      providerSymbol,
+    } satisfies MarketPricePoint;
+  }));
+  const points: MarketPricePoint[] = [];
+  const failedSymbols: string[] = [];
+  results.forEach((result, index) => {
+    if (result.status === "rejected") failedSymbols.push(symbols[index]!);
+    else if (result.value) points.push(result.value);
+  });
+  if (failedSymbols.length === symbols.length) throw new Error("Yahoo Finance live price batch failed");
   return { failedSymbols, points };
 }
 

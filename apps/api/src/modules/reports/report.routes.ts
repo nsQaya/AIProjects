@@ -126,8 +126,8 @@ reportRoutes.get("/dashboard",async (c) => {
       `SELECT a.id,a.name,a.account_type_id AS "accountTypeId",at.name AS "accountTypeName",a.currency_code AS "currencyCode",
               a.credit_limit::text AS "creditLimit",
               (CASE WHEN a.normal_balance='DEBIT'
-                THEN COALESCE(SUM(CASE WHEN t.id IS NULL THEN 0 WHEN e.direction='DEBIT' THEN e.base_amount ELSE -e.base_amount END),0)
-                ELSE -COALESCE(SUM(CASE WHEN t.id IS NULL THEN 0 WHEN e.direction='CREDIT' THEN e.base_amount ELSE -e.base_amount END),0)
+                THEN COALESCE(SUM(CASE WHEN t.id IS NULL THEN 0 WHEN e.direction='DEBIT' THEN e.amount ELSE -e.amount END),0)
+                ELSE -COALESCE(SUM(CASE WHEN t.id IS NULL THEN 0 WHEN e.direction='CREDIT' THEN e.amount ELSE -e.amount END),0)
               END)::text AS balance
        FROM accounts a
        JOIN account_types at ON at.id=a.account_type_id
@@ -222,8 +222,8 @@ reportRoutes.get("/balances",async (c) => {
   const result = await pool.query(
     `SELECT a.id,a.name,a.account_type_id AS "accountTypeId",at.name AS "accountTypeName",a.currency_code AS "currencyCode",
             (CASE WHEN a.normal_balance='DEBIT'
-              THEN COALESCE(SUM(CASE WHEN t.id IS NULL THEN 0 WHEN e.direction='DEBIT' THEN e.base_amount ELSE -e.base_amount END),0)
-              ELSE -COALESCE(SUM(CASE WHEN t.id IS NULL THEN 0 WHEN e.direction='CREDIT' THEN e.base_amount ELSE -e.base_amount END),0)
+              THEN COALESCE(SUM(CASE WHEN t.id IS NULL THEN 0 WHEN e.direction='DEBIT' THEN e.amount ELSE -e.amount END),0)
+              ELSE -COALESCE(SUM(CASE WHEN t.id IS NULL THEN 0 WHEN e.direction='CREDIT' THEN e.amount ELSE -e.amount END),0)
             END)::text balance
      FROM accounts a
      JOIN account_types at ON at.id=a.account_type_id
@@ -241,8 +241,8 @@ reportRoutes.get("/receivables-payables",async (c) => {
   const result = await pool.query(
     `SELECT c.id,c.name,c.contact_type AS "contactType",a.currency_code AS "currencyCode",
             (CASE WHEN a.normal_balance='DEBIT'
-              THEN COALESCE(SUM(CASE WHEN t.id IS NULL THEN 0 WHEN e.direction='DEBIT' THEN e.base_amount ELSE -e.base_amount END),0)
-              ELSE COALESCE(SUM(CASE WHEN t.id IS NULL THEN 0 WHEN e.direction='CREDIT' THEN e.base_amount ELSE -e.base_amount END),0)
+              THEN COALESCE(SUM(CASE WHEN t.id IS NULL THEN 0 WHEN e.direction='DEBIT' THEN e.amount ELSE -e.amount END),0)
+              ELSE COALESCE(SUM(CASE WHEN t.id IS NULL THEN 0 WHEN e.direction='CREDIT' THEN e.amount ELSE -e.amount END),0)
             END)::text balance
      FROM contacts c JOIN accounts a ON a.contact_id=c.id
      LEFT JOIN transaction_entries e ON e.account_id=a.id

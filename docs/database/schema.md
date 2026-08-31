@@ -17,6 +17,15 @@ Migration’lar `packages/database/migrations` altında sıralıdır. Değiştir
 - `013_investment_sales`: yatırım satış lotları ve satış hareketi bütünlüğü
 - `014_cost_centers`: bağımsız masraf merkezleri; işlem ve planlı işlem bağlantıları ile aynı defter guard’ları
 - `015_password_resets`: tek kullanımlık, süreli ve yalnız hash olarak saklanan parola sıfırlama kodları
+- `016_market_data_automation`: borsa sembol kataloğu, günlük fiyatlar, bölünme olayları ve senkron çalışmaları
+- `017_currency_rates`: para birimi kataloğu, defter bazlı aktif para birimleri ve TCMB günlük kurları
+- `018_fractional_share_quantity`: lot ve satış adet hassasiyeti `NUMERIC(24,9)`
+- `019_account_types`: defter bazlı özelleştirilebilir hesap türleri; `accounts.account_type_id` FK'ye geçiş
+- `020_live_market_prices`: gün içi anlık Yahoo fiyatları için `YAHOO_LIVE` kaynağı
+- `021_investment_accounts`: `account_types.is_investment` işareti; "Birikim" türü aracı kurum (yatırım) hesabı olur, birikim alım-satımı yalnızca bu türdeki hesapları hedef alır
+- `022_investment_purchase_postings`: `investment_lots.transaction_id`; alım artık aracı kurum hesabından nakit düşen bir ledger işlemi üretir (`SYSTEM_EQUITY` kontra), uygun eski lotlar geriye dönük bağlanır
+- `023_capital_increase_lots`: `investment_lots.kind` (`PURCHASE` / `CAPITAL_INCREASE`); bedelsiz/bedelli sermaye artışı ve elle bölünme özel lot olarak yazılır, `unit_price >= 0`
+- `024_multi_currency_postings`: `guard_transaction_entry_scope` gevşetildi; bir işlem artık farklı para birimli hesaplara dokunabilir (döviz alış/satış, dövizli yatırım postlaması), yalnızca `entry.currency_code = account.currency_code` şartı kalır. Denge hâlâ `assert_transaction_balanced` ile `base_amount` (TRY) üzerinden zorunlu. Hesap bakiyesi `amount`'tan (kendi para birimi), defter geneli toplamlar `base_amount` veya güncel kurdan hesaplanır
 
 Domain tabloları UUID, UTC `TIMESTAMPTZ` ve version alanlarını taşır; finansal
 kayıtlar soft-delete/ters kayıt kurallarına tabidir. Masraf merkezlerinde geçmiş

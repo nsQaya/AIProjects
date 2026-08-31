@@ -1,7 +1,8 @@
 import type { DbClient } from "../../infrastructure/database";
-import type { BackgroundJob } from "../../config/bindings";
+import type { BackgroundJob, PriceSyncMode } from "../../config/bindings";
 import {
   fetchMarketCatalog,
+  fetchYahooLivePrices,
   fetchYahooPrices,
   fetchYahooSplits,
   type MarketCatalogItem,
@@ -140,12 +141,31 @@ const runProjection = `id,kind,target_date::text AS "targetDate",status,total_it
   processed_items AS "processedItems",updated_items AS "updatedItems",missing_items AS "missingItems",
   failed_items AS "failedItems",started_at AS "startedAt",completed_at AS "completedAt",created_at AS "createdAt"`;
 
+// A PRICES run only reaches COMPLETED once every queued batch reports back; if a
+// batch exhausts its retries the run sits in QUEUED/RUNNING forever, which both
+// blocks createPriceSyncRun's dedup (you can't start a new one for that day) and
+// keeps the settings page's "sync running" button disabled. Retire any run that
+// has not recorded progress within this window so it can be re-triggered.
+const staleRunInterval = "15 minutes";
+
+export async function reclaimStalePriceRuns(client: DbClient) {
+  await client.query(
+    `UPDATE market_data_sync_runs
+       SET status='FAILED',
+           error_message=COALESCE(error_message,'Abandoned: a price batch did not finish within the expected window'),
+           completed_at=now(),updated_at=now()
+     WHERE kind='PRICES' AND status IN ('QUEUED','RUNNING')
+       AND updated_at < now() - interval '${staleRunInterval}'`,
+  );
+}
+
 export async function createPriceSyncRun(
   client: DbClient,
   targetDate: string,
   trigger: "MANUAL" | "SCHEDULED",
   requestedByUserId?: string,
 ): Promise<PriceSyncRun> {
+  await reclaimStalePriceRuns(client);
   const active = await client.query(
     `SELECT ${runProjection} FROM market_data_sync_runs
      WHERE kind='PRICES' AND target_date=$1 AND status IN ('QUEUED','RUNNING')
@@ -182,16 +202,33 @@ export async function ensureMarketData(
      ) AS fresh`,
   );
   if (!catalog.rows[0]?.fresh) await syncMarketCatalog(client);
+  await reclaimStalePriceRuns(client);
   const existing = await latestPriceSyncRun(client,targetDate);
-  if (!existing) {
+  // Retry a day that has no run yet, or whose last attempt died (stale run just
+  // reclaimed above, or a hard failure) - a COMPLETED run is left alone.
+  if (!existing || existing.status === "FAILED") {
     const run = await createPriceSyncRun(client,targetDate,"SCHEDULED");
     await queue.send({type:"PLAN_MARKET_PRICES",runId:run.id,targetDate});
   }
 }
 
-export async function planPriceSync(client: DbClient, queue: Queue<BackgroundJob>, runId: string, targetDate: string) {
+export async function planPriceSync(
+  client: DbClient,
+  queue: Queue<BackgroundJob>,
+  runId: string,
+  targetDate: string,
+  mode: PriceSyncMode = "CLOSE",
+) {
+  // Only the symbols someone actually tracks - across every book, not just the
+  // requesting one. The full market_symbols catalog is ~13k codes; fetching all
+  // of them every run swamped Yahoo (rate-limited batches would fail and never
+  // complete, which is why BIST codes in particular stopped updating).
   const symbols = await client.query<{id:string;symbol:string}>(
-    `SELECT id,provider_symbol AS symbol FROM market_symbols WHERE is_active=true ORDER BY id`,
+    `SELECT DISTINCT s.id,s.provider_symbol AS symbol
+     FROM market_symbols s
+     JOIN investment_instruments i ON i.market_symbol_id=s.id
+     WHERE s.is_active=true AND i.deleted_at IS NULL
+     ORDER BY s.id`,
   );
   // Turkish mutual funds have no catalog (TEFAS itself blocks the kind of
   // plain fetch() that builds market_symbols - see fund.provider.ts) - each
@@ -204,24 +241,28 @@ export async function planPriceSync(client: DbClient, queue: Queue<BackgroundJob
      ORDER BY i.id`,
   );
   const totalItems = symbols.rows.length + fundInstruments.rows.length;
-  await client.query(
+  const claimed = await client.query(
     `UPDATE market_data_sync_runs SET status='RUNNING',started_at=COALESCE(started_at,now()),
        total_items=$2,updated_at=now() WHERE id=$1 AND status IN ('QUEUED','RUNNING')`,
     [runId,totalItems],
   );
+  // The run was already reclaimed/failed (a stale duplicate PLAN job) - don't
+  // queue a second wave of batches against it.
+  if (!claimed.rowCount) return;
   if (totalItems === 0) {
     await client.query(
-      `UPDATE market_data_sync_runs SET status='COMPLETED',completed_at=now(),updated_at=now() WHERE id=$1`,
+      `UPDATE market_data_sync_runs SET status='COMPLETED',completed_at=now(),updated_at=now()
+       WHERE id=$1 AND status IN ('QUEUED','RUNNING')`,
       [runId],
     );
     return;
   }
   const messages = [
     ...chunks(symbols.rows,priceBatchSize).map((items,index) => ({
-      body: { type: "FETCH_MARKET_PRICE_BATCH", runId, targetDate, batchKey: String(index), items } as BackgroundJob,
+      body: { type: "FETCH_MARKET_PRICE_BATCH", runId, targetDate, mode, batchKey: String(index), items } as BackgroundJob,
     })),
     ...chunks(fundInstruments.rows,priceBatchSize).map((items,index) => ({
-      body: { type: "FETCH_FUND_PRICE_BATCH", runId, targetDate, batchKey: `fund:${index}`, items } as BackgroundJob,
+      body: { type: "FETCH_FUND_PRICE_BATCH", runId, targetDate, mode, batchKey: `fund:${index}`, items } as BackgroundJob,
     })),
   ];
   for (const group of chunks(messages,100)) await queue.sendBatch(group);
@@ -232,18 +273,23 @@ async function insertPrices(
   items: readonly PriceJobItem[],
   targetDate: string,
   fetcher: typeof fetch,
+  mode: PriceSyncMode = "CLOSE",
 ) {
   const bySymbol = new Map(items.map((item) => [item.symbol,item]));
-  const result = await fetchYahooPrices(items.map((item) => item.symbol),targetDate,fetcher);
+  const symbols = items.map((item) => item.symbol);
+  const result = mode === "LIVE"
+    ? await fetchYahooLivePrices(symbols,targetDate,fetcher)
+    : await fetchYahooPrices(symbols,targetDate,fetcher);
+  const source = mode === "LIVE" ? "YAHOO_LIVE" : "YAHOO";
   if (result.points.length > 0) {
     const values: unknown[] = [];
     const rows: string[] = [];
     for (const point of result.points) {
       const item = bySymbol.get(point.providerSymbol);
       if (!item) continue;
-      const offset = rows.length * 6;
-      values.push(item.id,point.priceDate,point.close,point.adjustedClose,point.currencyCode,new Date());
-      rows.push(`($${offset + 1},$${offset + 2},$${offset + 3},$${offset + 4},$${offset + 5},'YAHOO',$${offset + 6})`);
+      const offset = rows.length * 7;
+      values.push(item.id,point.priceDate,point.close,point.adjustedClose,point.currencyCode,source,new Date());
+      rows.push(`($${offset + 1},$${offset + 2},$${offset + 3},$${offset + 4},$${offset + 5},$${offset + 6},$${offset + 7})`);
     }
     if (rows.length > 0) {
       await client.query(
@@ -265,7 +311,7 @@ async function insertPrices(
 
 export async function processPriceBatch(
   client: DbClient,
-  job: {batchKey:string;items:PriceJobItem[];runId:string;targetDate:string},
+  job: {batchKey:string;items:PriceJobItem[];runId:string;targetDate:string;mode?:PriceSyncMode},
   fetcher: typeof fetch = fetch,
 ) {
   const alreadyDone = await client.query(
@@ -273,7 +319,7 @@ export async function processPriceBatch(
     [job.runId,job.batchKey],
   );
   if (alreadyDone.rowCount) return;
-  const counts = await insertPrices(client,job.items,job.targetDate,fetcher);
+  const counts = await insertPrices(client,job.items,job.targetDate,fetcher,job.mode ?? "CLOSE");
   await client.query("BEGIN");
   try {
     const inserted = await client.query(
@@ -288,7 +334,7 @@ export async function processPriceBatch(
            missing_items=missing_items+$4,failed_items=failed_items+$5,
            status=CASE WHEN processed_items+$2>=total_items THEN 'COMPLETED' ELSE 'RUNNING' END,
            completed_at=CASE WHEN processed_items+$2>=total_items THEN now() ELSE completed_at END,
-           updated_at=now() WHERE id=$1`,
+           updated_at=now() WHERE id=$1 AND status IN ('QUEUED','RUNNING')`,
         [job.runId,job.items.length,counts.updated,counts.missing,counts.failed],
       );
     }
@@ -299,7 +345,13 @@ export async function processPriceBatch(
   }
 }
 
-async function insertFundPrices(client: DbClient, items: readonly PriceJobItem[], fetcher: typeof fetch) {
+async function insertFundPrices(
+  client: DbClient,
+  items: readonly PriceJobItem[],
+  targetDate: string,
+  fetcher: typeof fetch,
+  mode: PriceSyncMode = "CLOSE",
+) {
   const bySymbol = new Map(items.map((item) => [item.symbol.trim().toUpperCase(),item]));
   const result = await fetchTefasFundPrices(items.map((item) => item.symbol),fetcher);
   if (result.points.length > 0) {
@@ -312,7 +364,10 @@ async function insertFundPrices(client: DbClient, items: readonly PriceJobItem[]
       // Fixed at Istanbul noon so a same-day rerun updates this exact row
       // instead of piling up duplicate prices for the day, and so it lines
       // up with listBookInstrumentPrices' Europe/Istanbul date join.
-      values.push(item.id,point.price,`${point.priceDate}T12:00:00+03:00`);
+      // LIVE (manual "update now") forces the latest NAV onto targetDate even
+      // when TEFAS has not published that day's value yet.
+      const priceDate = mode === "LIVE" ? targetDate : point.priceDate;
+      values.push(item.id,point.price,`${priceDate}T12:00:00+03:00`);
       rows.push(`($${offset + 1},$${offset + 2},$${offset + 3})`);
     }
     if (rows.length > 0) {
@@ -333,7 +388,7 @@ async function insertFundPrices(client: DbClient, items: readonly PriceJobItem[]
 
 export async function processFundPriceBatch(
   client: DbClient,
-  job: {batchKey:string;items:PriceJobItem[];runId:string;targetDate:string},
+  job: {batchKey:string;items:PriceJobItem[];runId:string;targetDate:string;mode?:PriceSyncMode},
   fetcher: typeof fetch = fetch,
 ) {
   const alreadyDone = await client.query(
@@ -341,7 +396,7 @@ export async function processFundPriceBatch(
     [job.runId,job.batchKey],
   );
   if (alreadyDone.rowCount) return;
-  const counts = await insertFundPrices(client,job.items,fetcher);
+  const counts = await insertFundPrices(client,job.items,job.targetDate,fetcher,job.mode ?? "CLOSE");
   await client.query("BEGIN");
   try {
     const inserted = await client.query(
@@ -356,7 +411,7 @@ export async function processFundPriceBatch(
            missing_items=missing_items+$4,failed_items=failed_items+$5,
            status=CASE WHEN processed_items+$2>=total_items THEN 'COMPLETED' ELSE 'RUNNING' END,
            completed_at=CASE WHEN processed_items+$2>=total_items THEN now() ELSE completed_at END,
-           updated_at=now() WHERE id=$1`,
+           updated_at=now() WHERE id=$1 AND status IN ('QUEUED','RUNNING')`,
         [job.runId,job.items.length,counts.updated,counts.missing,counts.failed],
       );
     }
@@ -444,7 +499,7 @@ export async function listBookInstrumentPrices(client: DbClient, bookId: string,
     `SELECT i.id AS "instrumentId",$2::date::text AS "priceDate",
        COALESCE(mp.close,manual.price,0)::text AS price,
        (mp.close IS NOT NULL OR manual.price IS NOT NULL) AS available,
-       CASE WHEN mp.close IS NOT NULL THEN 'YAHOO' WHEN manual.price IS NOT NULL THEN 'MANUAL' ELSE 'MISSING' END AS source
+       CASE WHEN mp.close IS NOT NULL THEN mp.source WHEN manual.price IS NOT NULL THEN 'MANUAL' ELSE 'MISSING' END AS source
      FROM investment_instruments i
      LEFT JOIN market_daily_prices mp ON mp.market_symbol_id=i.market_symbol_id AND mp.price_date=$2::date
      LEFT JOIN LATERAL (

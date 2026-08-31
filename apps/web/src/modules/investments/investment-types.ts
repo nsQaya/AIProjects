@@ -1,9 +1,23 @@
 import type { MoneyString, UUID, Version } from "@defterx/contracts";
 
+import type { FxAccountOption, FxConversionValues } from "../fx";
+
 /** Minimal account projection needed by investment purchase and sale forms. */
 export interface InvestmentAccountOption {
   readonly id: UUID;
   readonly name: string;
+  readonly isArchived: boolean;
+}
+
+/** A brokerage/custodian account with its available cash, shown as a card on the investments page. */
+export interface InvestmentBrokerageAccount {
+  readonly id: UUID;
+  readonly name: string;
+  readonly currencyCode: string;
+  /** Cash in the account's own currency. */
+  readonly displayBalance: MoneyString;
+  /** displayBalance in the book base currency (TRY); equals displayBalance for a TRY account. */
+  readonly displayBalanceTry: MoneyString;
   readonly isArchived: boolean;
 }
 
@@ -13,6 +27,8 @@ export interface InvestmentInstrumentOption {
   readonly name: string;
   readonly symbol: string | null;
   readonly isActive: boolean;
+  /** Set when the instrument tracks a market symbol (auto prices + auto ratio splits). */
+  readonly marketSymbolId?: UUID | null;
 }
 
 export interface InvestmentPortfolioViewModel {
@@ -47,6 +63,8 @@ export interface InvestmentLotViewModel {
   readonly costBasis: MoneyString;
   readonly purchasedAt: string;
   readonly notes: string | null;
+  readonly kind: "PURCHASE" | "CAPITAL_INCREASE";
+  readonly posted: boolean;
   readonly version: Version;
 }
 
@@ -81,6 +99,15 @@ export interface UpdateInvestmentLotValues extends InvestmentLotValues {
   readonly version: Version;
 }
 
+export interface CapitalIncreaseValues {
+  readonly instrumentId: UUID;
+  readonly newTotalQuantity: MoneyString;
+  readonly amountPaid: MoneyString;
+  readonly accountId: UUID | null;
+  readonly effectiveAt: string;
+  readonly notes: string | null;
+}
+
 export interface InvestmentSaleValues {
   readonly instrumentId: UUID;
   readonly destinationAccountId: UUID;
@@ -100,13 +127,18 @@ export interface InvestmentPageCallbacks {
   onCreateLot: (values: InvestmentLotValues) => InvestmentMutation;
   onUpdateLot: (id: UUID, values: UpdateInvestmentLotValues) => InvestmentMutation;
   onDeleteLot: (id: UUID, version: Version) => InvestmentMutation;
+  onCreateCapitalIncrease: (values: CapitalIncreaseValues) => InvestmentMutation;
   onCreateSale: (values: InvestmentSaleValues) => InvestmentMutation;
   onUpdateSale: (id: UUID, values: UpdateInvestmentSaleValues) => InvestmentMutation;
   onDeleteSale: (id: UUID, version: Version) => InvestmentMutation;
+  onCreateFxConversion: (values: FxConversionValues) => InvestmentMutation;
 }
 
 export interface InvestmentsPageModel {
   readonly accounts: readonly InvestmentAccountOption[];
+  readonly brokerageAccounts: readonly InvestmentBrokerageAccount[];
+  /** Every non-system account (with its currency), for the döviz al/sat dialog. */
+  readonly fxAccounts: readonly FxAccountOption[];
   readonly instruments: readonly InvestmentInstrumentOption[];
   readonly lots: readonly InvestmentLotViewModel[];
   readonly portfolio: readonly InvestmentPortfolioViewModel[];

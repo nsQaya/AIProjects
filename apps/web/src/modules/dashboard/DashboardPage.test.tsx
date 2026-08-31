@@ -19,6 +19,7 @@ const accounts: readonly AccountView[] = [
     accountTypeId: "00000000-0000-4000-8000-000000000091",
     accountTypeName: "Banka",
     accountTypeIcon: null,
+    isInvestment: false,
     normalBalance: "DEBIT",
     currencyCode: "TRY",
     allowNegativeBalance: false,
@@ -28,6 +29,8 @@ const accounts: readonly AccountView[] = [
     version: 1,
     balance: "1200",
     displayBalance: "1200",
+    displayBalanceTry: "1200",
+    openingBalance: "0",
     availableCredit: null,
     ui: {
       balance: 1200,
@@ -44,6 +47,7 @@ const accounts: readonly AccountView[] = [
     accountTypeId: "00000000-0000-4000-8000-000000000092",
     accountTypeName: "Nakit",
     accountTypeIcon: null,
+    isInvestment: false,
     normalBalance: "DEBIT",
     currencyCode: "TRY",
     allowNegativeBalance: false,
@@ -53,6 +57,8 @@ const accounts: readonly AccountView[] = [
     version: 1,
     balance: "300",
     displayBalance: "300",
+    displayBalanceTry: "300",
+    openingBalance: "0",
     availableCredit: null,
     ui: {
       balance: 300,
@@ -191,6 +197,7 @@ describe("DashboardPage", () => {
       normalBalance: "CREDIT",
       balance: "500",
       displayBalance: "-500",
+      displayBalanceTry: "-500",
       ui: {
         balance: 500,
         displayBalance: -500,

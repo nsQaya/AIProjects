@@ -2,9 +2,11 @@ import {
   BarChart,
   LineChart,
   PieChart,
+  TreemapChart,
   type BarSeriesOption,
   type LineSeriesOption,
   type PieSeriesOption,
+  type TreemapSeriesOption,
 } from "echarts/charts";
 import {
   AriaComponent,
@@ -26,6 +28,7 @@ registerEChartsModules([
   BarChart,
   LineChart,
   PieChart,
+  TreemapChart,
   AriaComponent,
   GridComponent,
   LegendComponent,
@@ -44,6 +47,7 @@ export type ReportChartOption = ComposeOption<
   | PieSeriesOption
   | TitleComponentOption
   | TooltipComponentOption
+  | TreemapSeriesOption
 >;
 
 export type ReportChartInstance = EChartsType;

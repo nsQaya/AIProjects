@@ -140,7 +140,18 @@ export async function realizeScheduled(
   client: DbClient,
   userId: string,
   scheduledId: string,
-  input: { version: number; transactionDate?: string; clientOperationId: string },
+  input: {
+    version: number;
+    transactionDate?: string;
+    clientOperationId: string;
+    transactionType?: "INCOME" | "EXPENSE" | "TRANSFER";
+    accountId?: string;
+    targetAccountId?: string | null;
+    categoryId?: string | null;
+    costCenterId?: string | null;
+    title?: string;
+    amount?: string;
+  },
 ) {
   return inTransaction(client,async transaction=>{
     const found = await transaction.query<{
@@ -162,16 +173,25 @@ export async function realizeScheduled(
     if (!['PENDING','OVERDUE'].includes(item.status)) throw new AppError(409,"SCHEDULED_TRANSACTION_NOT_ACTIONABLE","Only pending or overdue plans can be realized");
     if (item.version !== input.version) throw new AppError(409,"VERSION_CONFLICT","Scheduled transaction changed on another device");
 
+    // Any override left undefined keeps the plan's own value. A resolved TRANSFER
+    // drops category/cost center and needs a target; anything else drops target.
+    const type = input.transactionType ?? item.transaction_type;
+    const pick = <T,>(override: T | null | undefined, fallback: T | null) =>
+      override !== undefined ? override : fallback;
+    const targetAccountId = type === "TRANSFER" ? pick(input.targetAccountId, item.target_account_id) : null;
+    const categoryId = type === "TRANSFER" ? null : pick(input.categoryId, item.category_id);
+    const costCenterId = type === "TRANSFER" ? null : pick(input.costCenterId, item.cost_center_id);
+
     const posted = await createTransactionWithClient(transaction,userId,{
       bookId:item.book_id,
-      type:item.transaction_type,
-      title:item.title,
-      amount:item.amount,
+      type,
+      title:input.title??item.title,
+      amount:input.amount??item.amount,
       currencyCode:item.currency_code,
-      accountId:item.account_id,
-      ...(item.target_account_id?{targetAccountId:item.target_account_id}:{}),
-      ...(item.category_id?{categoryId:item.category_id}:{}),
-      ...(item.cost_center_id?{costCenterId:item.cost_center_id}:{}),
+      accountId:input.accountId??item.account_id,
+      ...(targetAccountId?{targetAccountId}:{}),
+      ...(categoryId?{categoryId}:{}),
+      ...(costCenterId?{costCenterId}:{}),
       ...(item.contact_id?{contactId:item.contact_id}:{}),
       transactionDate:input.transactionDate??new Date().toISOString(),
       clientOperationId:input.clientOperationId,

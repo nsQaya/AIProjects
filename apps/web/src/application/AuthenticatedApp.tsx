@@ -9,6 +9,7 @@ import { TransactionDialog } from "../modules/transactions/TransactionDialog";
 import type { TransactionDraft } from "../modules/transactions/transaction-types";
 import { useFinance } from "../providers/FinanceProvider";
 import { errorMessage } from "../lib/error-message";
+import { useToast } from "./ToastProvider";
 import { AccountsRoute } from "./routes/AccountsRoute";
 import { DashboardRoute } from "./routes/DashboardRoute";
 import { InvestmentsRoute } from "./routes/InvestmentsRoute";
@@ -22,6 +23,7 @@ const ReportsPage = lazy(() =>
 
 export function AuthenticatedApp() {
   const { logout, session } = useAuth();
+  const { showToast } = useToast();
   const { apiStatus, initializationError, mutate, mutationBusy, refresh, service, snapshot } = useFinance();
   const [transactionEditor, setTransactionEditor] = useState<TransactionView | null | undefined>();
 
@@ -63,6 +65,7 @@ export function AuthenticatedApp() {
               loadFailed={snapshot.reportLoadFailed}
               range={snapshot.reportRange}
               onFilterChange={(filter) => service.loadReportAnalytics(filter)}
+              onNotify={showToast}
             />
           </Suspense>
         )}

@@ -4,7 +4,7 @@ import type { LedgerEntryDraft, LedgerMappingInput } from "./ledger.types";
 
 const entry = (accountId: string | undefined, direction: "DEBIT" | "CREDIT", input: LedgerMappingInput): LedgerEntryDraft => {
   if (!accountId) throw new AppError(422, "LEDGER_MAPPING_MISSING", `An account required for ${input.type} is missing`);
-  return { accountId, direction, amount: input.amount, currencyCode: input.currencyCode, baseAmount: input.amount };
+  return { accountId, direction, amount: input.amount, currencyCode: input.currencyCode, baseAmount: input.baseAmount ?? input.amount };
 };
 
 export function mapTransactionToEntries(input: LedgerMappingInput): LedgerEntryDraft[] {

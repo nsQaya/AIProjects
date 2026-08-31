@@ -1,9 +1,9 @@
 import { useState, type CSSProperties } from "react";
-import type { AccountTypeDTO } from "@defterx/contracts";
+import type { AccountTypeDTO, CurrencyDTO } from "@defterx/contracts";
 
 import { Button, InlineFeedback } from "../../components/ui";
 import { errorMessage } from "../../lib/error-message";
-import { money, toNumber } from "../../lib/format";
+import { money, moneyInCurrency, toNumber } from "../../lib/format";
 import { AccountDialog } from "./AccountDialog";
 import type { AccountViewModel, AccountsPageCallbacks } from "./account-types";
 
@@ -12,6 +12,7 @@ const DEFAULT_ACCOUNT_SYMBOL = "▥";
 export interface AccountsPageProps extends AccountsPageCallbacks {
   accounts: readonly AccountViewModel[];
   accountTypes: readonly AccountTypeDTO[];
+  currencies?: readonly CurrencyDTO[];
   busy?: boolean;
   confirmDelete?: (account: AccountViewModel) => boolean | Promise<boolean>;
 }
@@ -19,6 +20,7 @@ export interface AccountsPageProps extends AccountsPageCallbacks {
 export function AccountsPage({
   accounts,
   accountTypes,
+  currencies = [],
   busy = false,
   confirmDelete = (account) =>
     globalThis.confirm(`“${account.name}” hesabı silinsin mi? Kullanılmışsa arşivlenecektir.`),
@@ -31,7 +33,7 @@ export function AccountsPage({
   const [pageFeedback, setPageFeedback] = useState("");
   const total = accounts
     .filter((account) => !account.isArchived)
-    .reduce((sum, account) => sum + toNumber(account.displayBalance), 0);
+    .reduce((sum, account) => sum + toNumber(account.displayBalanceTry), 0);
 
   const deleteAccount = async (account: AccountViewModel) => {
     if (account.isArchived || busy || deletingAccountId !== null) return;
@@ -121,9 +123,18 @@ export function AccountsPage({
                   <h3>{account.name}</h3>
                 </div>
 
-                <strong className={balance < 0 ? "expense" : undefined}>
-                  {money(account.displayBalance)}
-                </strong>
+                <div className="account-balance">
+                  <strong className={balance < 0 ? "expense" : undefined}>
+                    {account.currencyCode === "TRY"
+                      ? money(account.displayBalance)
+                      : moneyInCurrency(account.displayBalance, account.currencyCode)}
+                  </strong>
+                  {account.currencyCode !== "TRY" ? (
+                    <span className="account-balance-try">
+                      ≈ {money(account.displayBalanceTry)}
+                    </span>
+                  ) : null}
+                </div>
                 <small>
                   {account.creditLimit !== null
                     ? `Limit ${money(account.creditLimit)}${
@@ -147,6 +158,7 @@ export function AccountsPage({
           key={editingAccount?.id ?? "new-account"}
           account={editingAccount}
           accountTypes={accountTypes}
+          currencies={currencies}
           onClose={() => setEditingAccount(undefined)}
           onCreate={onCreateAccount}
           onUpdate={onUpdateAccount}

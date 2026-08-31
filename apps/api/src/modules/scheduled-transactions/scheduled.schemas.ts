@@ -46,10 +46,20 @@ export const scheduledStatusSchema = z.object({
   version: z.number().int().positive()
 });
 
+const realizableType = z.enum(["INCOME", "EXPENSE", "TRANSFER"]);
+
 export const realizeScheduledSchema = z.object({
   version: z.number().int().positive(),
   transactionDate: isoDate.optional(),
-  clientOperationId: uuid
+  clientOperationId: uuid,
+  // Optional edits applied over the plan's own values when posting.
+  transactionType: realizableType.optional(),
+  accountId: uuid.optional(),
+  targetAccountId: uuid.nullable().optional(),
+  categoryId: uuid.nullable().optional(),
+  costCenterId: uuid.nullable().optional(),
+  title: z.string().trim().min(1).max(200).optional(),
+  amount: money.optional()
 });
 
 export type CreateScheduledInput = z.infer<typeof createScheduledSchema>;

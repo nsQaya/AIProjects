@@ -119,8 +119,22 @@ select, input { min-height: 42px; padding: 0 12px; color: var(--ink); border: 1p
 .account-card::after { content: ""; position: absolute; width: 150px; height: 150px; right: -55px; bottom: -70px; border: 25px solid color-mix(in srgb, var(--account) 9%, transparent); border-radius: 50%; }
 .account-top { display: flex; justify-content: space-between; }.account-top button { border: 0; background: transparent; color: var(--muted); }
 .account-symbol { width: 40px; height: 40px; display: grid; place-items: center; color: var(--account); background: color-mix(in srgb, var(--account) 12%, white); border-radius: 12px; font-size: 18px; }
-.account-card small { color: var(--muted); }.account-card h3 { margin-top: 4px; font-family: Georgia, serif; font-size: 19px; }.account-card > strong { font-family: Georgia, serif; font-size: 26px; }
+.account-card small { color: var(--muted); }.account-card h3 { margin-top: 4px; font-family: Georgia, serif; font-size: 19px; }.account-card strong { font-family: Georgia, serif; font-size: 26px; }
+.account-balance { display: flex; flex-direction: column; gap: 2px; }
+.account-balance-try { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
 .account-line { position: absolute; height: 3px; inset: auto 0 0; background: color-mix(in srgb, var(--account) 20%, white); }.account-line span { display: block; width: 70%; height: 100%; background: var(--account); }
+.account-section { padding: 0; }
+.account-section > summary { padding: 20px 22px; position: relative; display: grid; gap: 7px; cursor: pointer; list-style: none; }
+.account-section > summary::-webkit-details-marker { display: none; }
+.account-section > summary::after { content: "⌄"; position: absolute; right: 22px; top: 20px; color: var(--muted); font-size: 15px; transition: transform .15s ease; }
+.account-section[open] > summary::after { transform: rotate(180deg); }
+.account-section > summary:focus-visible { outline: 2px solid var(--forest-700); outline-offset: -2px; }
+.account-section-headline { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; padding-right: 22px; }
+.account-section-headline h2 { font-family: Georgia, serif; font-size: 19px; font-weight: 600; }
+.account-section-total { font-family: Georgia, serif; font-size: 22px; white-space: nowrap; }
+.account-section-figures { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.account-section[data-account-group="unlinked"] .account-section-headline h2 { color: var(--muted); }
+.account-section > .account-grid, .account-section > .empty-state { padding: 0 22px 22px; }
 .schedule-panel { min-height: 440px; }.schedule-list { display: grid; }
 .schedule-row { min-height: 82px; display: grid; grid-template-columns: 25px 120px minmax(150px,1fr) auto 105px minmax(190px,auto); align-items: center; gap: 12px; border-top: 1px solid var(--line); }
 .timeline-dot { height: 100%; position: relative; display: grid; place-items: center; }.timeline-dot i { width: 10px; height: 10px; z-index: 1; border: 3px solid var(--green-soft); border-radius: 50%; background: var(--forest-700); }.timeline-dot b { position: absolute; width: 1px; top: 50%; bottom: -50%; background: var(--line); }
@@ -147,8 +161,9 @@ select, input { min-height: 42px; padding: 0 12px; color: var(--ink); border: 1p
 .checkbox-field { min-height: 42px; display: flex !important; grid-template-columns: auto 1fr; align-items: center; }
 .checkbox-field input { min-height: auto; width: 18px; height: 18px; }
 .account-card.archived { opacity: .62; }
-.investment-table { min-width: 800px; }
-.investment-table .table-head, .investment-table .table-row { grid-template-columns: 1.25fr 1fr .75fr 1fr 1fr 105px; }
+.investment-table { min-width: 920px; }
+.investment-table .table-head, .investment-table .table-row { grid-template-columns: 1.2fr .9fr .7fr .95fr .95fr 1fr 105px; }
+.investment-table .lot-account small { display: block; color: var(--muted); font-size: 9px; }
 .sale-table { min-width: 940px; }
 .sale-table .table-head, .sale-table .table-row { grid-template-columns: 1.2fr .9fr .65fr .9fr 1.05fr .9fr 105px; }
 .loading-state { margin-bottom: 12px; padding: 10px 14px; color: var(--forest-700); background: var(--green-soft); border-radius: 10px; font-weight: 700; }

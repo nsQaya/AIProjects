@@ -10,8 +10,10 @@ import {
 } from "../../components/ui";
 import { isoAtLocalNoon, isoDay, today } from "../../lib/date";
 import { errorMessage } from "../../lib/error-message";
-import { positiveDecimalString } from "./decimal";
+import { nonNegativeDecimalString, positiveDecimalString } from "./decimal";
+import { toNumber } from "../../lib/format";
 import type {
+  CapitalIncreaseValues,
   InvestmentAccountOption,
   InvestmentInstrumentOption,
   InvestmentLotValues,
@@ -190,19 +192,20 @@ export function LotDialog({
             />
           </label>
           <label>
-            <span>İlişkili hesap (isteğe bağlı)</span>
+            <span>Hangi aracı kurum hesabından? (isteğe bağlı)</span>
             <select
               name="accountId"
               defaultValue={lot?.accountId ?? ""}
               disabled={busy}
             >
-              <option value="">Hesap ilişkilendirme</option>
+              <option value="">Hesap seçme</option>
               {selectableAccounts.map((item) => (
                 <option key={item.id} value={item.id}>
                   {item.name}{item.isArchived ? " · Arşivli" : ""}
                 </option>
               ))}
             </select>
+            <small>Hesap seçersen alım bedeli o hesabın nakitinden düşülür.</small>
           </label>
           <label className="full-field">
             <span>Not</span>
@@ -433,6 +436,169 @@ export function SaleDialog({
           <DialogCancelButton disabled={busy}>Vazgeç</DialogCancelButton>
           <Button type="submit" variant="primary" loading={busy}>
             {sale ? "Değişiklikleri kaydet" : "Satışı kaydet"}
+          </Button>
+        </DialogActions>
+      </form>
+    </Dialog>
+  );
+}
+
+export interface CapitalIncreaseDialogProps extends InvestmentDialogBaseProps {
+  portfolio: readonly InvestmentPortfolioViewModel[];
+  onCreate: (values: CapitalIncreaseValues) => Promise<unknown>;
+}
+
+export function CapitalIncreaseDialog({
+  accounts,
+  instruments,
+  onClose,
+  onCreate,
+  portfolio,
+}: CapitalIncreaseDialogProps) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [instrumentId, setInstrumentId] = useState("");
+  const [amountPaid, setAmountPaid] = useState("0");
+
+  const positions = portfolio.filter((item) => positiveDecimalString(item.quantity) !== null);
+  const selected = positions.find((item) => item.instrumentId === instrumentId);
+  const currentQuantity = selected ? toNumber(selected.quantity) : null;
+  const linkedInstrument = instruments.find(
+    (item) => item.id === instrumentId && item.marketSymbolId != null,
+  );
+  const paid = nonNegativeDecimalString(amountPaid) !== "0";
+  const selectableAccounts = uniqueById(accounts.filter((item) => !item.isArchived));
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const values = new FormData(event.currentTarget);
+    const newTotalQuantity = positiveDecimalString(formString(values, "newTotalQuantity"));
+    const parsedPaid = nonNegativeDecimalString(formString(values, "amountPaid"));
+    const accountId = formString(values, "accountId");
+    const effectiveAt = formString(values, "effectiveAt");
+    if (!instrumentId) {
+      setError("Bir yatırım aracı seçin.");
+      return;
+    }
+    if (!newTotalQuantity) {
+      setError("Yeni toplam adedi girin.");
+      return;
+    }
+    if (parsedPaid === null) {
+      setError("Ödenen tutar geçersiz.");
+      return;
+    }
+    if (parsedPaid !== "0" && !accountId) {
+      setError("Bedelli artışta ödemenin çıktığı hesabı seçin.");
+      return;
+    }
+    if (!effectiveAt) {
+      setError("Tarihi seçin.");
+      return;
+    }
+
+    const notes = formString(values, "notes").trim();
+    setError(null);
+    setBusy(true);
+    void Promise.resolve()
+      .then(() =>
+        onCreate({
+          instrumentId,
+          newTotalQuantity,
+          amountPaid: parsedPaid,
+          accountId: accountId || null,
+          effectiveAt: isoAtLocalNoon(effectiveAt),
+          notes: notes || null,
+        }),
+      )
+      .then(onClose)
+      .catch((reason: unknown) => setError(errorMessage(reason)))
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <Dialog
+      id="capital-increase-dialog"
+      className="compact-dialog"
+      open
+      onClose={() => {
+        if (!busy) onClose();
+      }}
+    >
+      <form id="capital-increase-form" onSubmit={handleSubmit} aria-busy={busy || undefined}>
+        <DialogHeader
+          eyebrow="Portföy"
+          title="Sermaye artırımı / bölünme"
+          closeLabel="Pencereyi kapat"
+        />
+        <div className="form-grid dialog-form-grid">
+          <label className="full-field">
+            <span>Yatırım aracı</span>
+            <select
+              name="instrumentId"
+              value={instrumentId}
+              disabled={busy}
+              onChange={(event) => setInstrumentId(event.target.value)}
+              required
+            >
+              <option value="">Açık pozisyon seçin</option>
+              {positions.map((item) => (
+                <option key={item.instrumentId} value={item.instrumentId}>
+                  {item.name}
+                  {item.symbol ? ` (${item.symbol})` : ""} · {item.quantity} adet
+                </option>
+              ))}
+            </select>
+            {linkedInstrument ? (
+              <small>
+                Bu araç Yahoo’ya bağlı; oran bölünmeleri otomatik uygulanır. Bedelsiz
+                artışları elle girme, çift sayılabilir.
+              </small>
+            ) : null}
+          </label>
+          <label>
+            <span>Yeni toplam adet</span>
+            <input name="newTotalQuantity" inputMode="decimal" disabled={busy} required />
+            {currentQuantity !== null ? (
+              <small>Şu an: {selected?.quantity} adet</small>
+            ) : null}
+          </label>
+          <label>
+            <span>Bu artırım için ödenen tutar</span>
+            <input
+              name="amountPaid"
+              inputMode="decimal"
+              value={amountPaid}
+              disabled={busy}
+              onChange={(event) => setAmountPaid(event.target.value)}
+            />
+            <small>Bedelsiz / bölünmede 0 bırakın.</small>
+          </label>
+          <label className="full-field">
+            <span>{paid ? "Ödeme hangi hesaptan? (gerekli)" : "Aracı kurum hesabı (isteğe bağlı)"}</span>
+            <select name="accountId" disabled={busy} defaultValue="">
+              <option value="">Hesap seçme</option>
+              {selectableAccounts.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Tarih</span>
+            <input name="effectiveAt" type="date" defaultValue={today()} disabled={busy} required />
+          </label>
+          <label className="full-field">
+            <span>Not</span>
+            <input name="notes" maxLength={1000} disabled={busy} />
+          </label>
+        </div>
+        <DialogFeedback message={error} />
+        <DialogActions>
+          <DialogCancelButton disabled={busy}>Vazgeç</DialogCancelButton>
+          <Button type="submit" variant="primary" loading={busy}>
+            Kaydet
           </Button>
         </DialogActions>
       </form>

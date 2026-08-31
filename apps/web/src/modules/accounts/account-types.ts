@@ -11,7 +11,12 @@ export interface AccountViewModel {
   readonly accountTypeId: UUID;
   readonly accountTypeName: string;
   readonly accountTypeIcon: string | null;
+  readonly currencyCode: string;
   readonly displayBalance: MoneyString;
+  /** displayBalance converted to TRY at the latest rate; equals displayBalance for a TRY account. */
+  readonly displayBalanceTry: MoneyString;
+  /** Current opening-balance magnitude in the account's own currency; "0" when none. */
+  readonly openingBalance: MoneyString;
   readonly allowNegativeBalance: boolean;
   readonly creditLimit: MoneyString | null;
   readonly availableCredit: MoneyString | null;
@@ -28,9 +33,13 @@ export interface AccountFormValues {
 
 export interface CreateAccountValues extends AccountFormValues {
   readonly openingBalance: MoneyString;
+  /** Defaults to the book's base currency when omitted. Locked after creation. */
+  readonly currencyCode?: string;
 }
 
 export interface UpdateAccountValues extends AccountFormValues {
+  /** When set and different from the stored one, the opening balance is re-posted. */
+  readonly openingBalance?: MoneyString;
   readonly version: Version;
 }
 

@@ -6,6 +6,7 @@ import type {
   CostCenterDTO,
   CurrencyDTO,
   InvestmentAssetTypeDTO,
+  InvestmentBrokerageAccountDTO,
   IncomeExpenseCostCenterItemDTO,
   ReceivablePayableReportItemDTO,
   ReportAnalyticsResponse,
@@ -96,6 +97,7 @@ export interface FinanceSnapshot {
   lots: readonly InvestmentLotView[];
   sales: readonly InvestmentSaleView[];
   portfolio: readonly InvestmentPortfolioItemView[];
+  brokerageAccounts: readonly InvestmentBrokerageAccountDTO[];
 }
 
 export const emptyDashboard: DashboardView = {
@@ -146,5 +148,6 @@ export function createInitialFinanceSnapshot(): FinanceSnapshot {
     lots: [],
     sales: [],
     portfolio: [],
+    brokerageAccounts: [],
   };
 }

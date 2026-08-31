@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import type { AccountTypeDTO, MoneyString } from "@defterx/contracts";
+import type { AccountTypeDTO, CurrencyDTO, MoneyString } from "@defterx/contracts";
 
 import {
   Button,
@@ -21,6 +21,7 @@ import type {
 interface AccountDialogProps {
   account: AccountViewModel | null;
   accountTypes: readonly AccountTypeDTO[];
+  currencies: readonly CurrencyDTO[];
   onClose: () => void;
   onCreate: (values: CreateAccountValues) => AccountMutation;
   onUpdate: (id: string, values: UpdateAccountValues) => AccountMutation;
@@ -29,6 +30,12 @@ interface AccountDialogProps {
 function amountInputValue(value: MoneyString | null): string {
   if (value === null || value === "") return "";
   return value.replace(".", ",");
+}
+
+/** "1000.000000" -> "1000", "1250.500000" -> "1250,5" for a friendly default. */
+function openingBalanceInputValue(value: MoneyString): string {
+  const trimmed = value.includes(".") ? value.replace(/\.?0+$/, "") : value;
+  return amountInputValue(trimmed || "0");
 }
 
 function nonNegativeMoney(value: string, label: string): MoneyString {
@@ -44,15 +51,19 @@ function nonNegativeMoney(value: string, label: string): MoneyString {
 export function AccountDialog({
   account,
   accountTypes,
+  currencies,
   onClose,
   onCreate,
   onUpdate,
 }: AccountDialogProps) {
   const editing = account !== null;
+  const currencyOptions = currencies.filter((option) => option.isEnabled);
   const [accountTypeId, setAccountTypeId] = useState(
     account?.accountTypeId ?? accountTypes[0]?.id ?? "",
   );
-  const [openingBalance, setOpeningBalance] = useState("0");
+  const [openingBalance, setOpeningBalance] = useState(
+    account ? openingBalanceInputValue(account.openingBalance) : "0",
+  );
   const [allowNegativeBalance, setAllowNegativeBalance] = useState(
     account?.allowNegativeBalance ?? false,
   );
@@ -100,12 +111,19 @@ export function AccountDialog({
         creditLimit: normalizedLimit,
       } satisfies AccountFormValues;
 
+      const submittedOpeningBalance = nonNegativeMoney(read("openingBalance"), "Açılış bakiyesi");
+
       setSubmitting(true);
       const result = editing
-        ? await onUpdate(account.id, { ...values, version: account.version })
+        ? await onUpdate(account.id, {
+            ...values,
+            openingBalance: submittedOpeningBalance,
+            version: account.version,
+          })
         : await onCreate({
             ...values,
-            openingBalance: nonNegativeMoney(read("openingBalance"), "Açılış bakiyesi"),
+            openingBalance: submittedOpeningBalance,
+            currencyCode: read("currencyCode") || "TRY",
           });
 
       if (result !== false) onClose();
@@ -165,18 +183,42 @@ export function AccountDialog({
             </select>
           </label>
 
-          {!editing ? (
-            <label className="opening-field">
-              <span>Açılış bakiyesi</span>
-              <input
-                inputMode="decimal"
-                name="openingBalance"
-                required
-                value={openingBalance}
-                onChange={(event) => setOpeningBalance(event.currentTarget.value)}
-              />
+          {editing ? (
+            <label>
+              <span>Para birimi</span>
+              <input name="currencyDisplay" value={account.currencyCode} readOnly disabled />
+              <small>Para birimi hesap açıldıktan sonra değiştirilemez.</small>
             </label>
-          ) : null}
+          ) : (
+            <label>
+              <span>Para birimi</span>
+              <select name="currencyCode" defaultValue="TRY">
+                {currencyOptions.map((option) => (
+                  <option key={option.code} value={option.code}>
+                    {option.code} · {option.nameTr}
+                  </option>
+                ))}
+              </select>
+              <small>Döviz için önce Ayarlar’dan o para birimini etkinleştirin.</small>
+            </label>
+          )}
+
+          <label className="opening-field">
+            <span>Açılış bakiyesi{editing ? ` (${account.currencyCode})` : ""}</span>
+            <input
+              inputMode="decimal"
+              name="openingBalance"
+              required
+              value={openingBalance}
+              onChange={(event) => setOpeningBalance(event.currentTarget.value)}
+            />
+            {editing ? (
+              <small>
+                Değiştirirsen eski açılış kaydı iptal edilip yeni tutarla yeniden
+                oluşturulur. Şimdiye kadar harcanandan düşük bir tutar reddedilir.
+              </small>
+            ) : null}
+          </label>
 
           <label className="checkbox-field full-field">
             <input

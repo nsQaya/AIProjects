@@ -409,6 +409,7 @@ export function AccountTypeDialog({
       ? accountType?.normalBalance
       : formString(values, "normalBalance")) as "DEBIT" | "CREDIT";
     const defaultAllowNegativeBalance = values.has("defaultAllowNegativeBalance");
+    const isInvestment = values.has("isInvestment");
     const sortOrder = Number(formString(values, "sortOrder")) || 0;
     const input: SaveAccountTypeInput = accountType
       ? {
@@ -417,10 +418,11 @@ export function AccountTypeDialog({
           name,
           normalBalance,
           defaultAllowNegativeBalance,
+          isInvestment,
           sortOrder,
           version: accountType.version,
         }
-      : { mode: "create", name, normalBalance, defaultAllowNegativeBalance, sortOrder };
+      : { mode: "create", name, normalBalance, defaultAllowNegativeBalance, isInvestment, sortOrder };
 
     setError(null);
     setBusy(true);
@@ -471,6 +473,15 @@ export function AccountTypeDialog({
               disabled={busy}
             />
             <span>Yeni hesaplarda eksi bakiyeye varsayılan olarak izin ver</span>
+          </label>
+          <label className="checkbox-field full-field">
+            <input
+              name="isInvestment"
+              type="checkbox"
+              defaultChecked={accountType?.isInvestment ?? false}
+              disabled={busy}
+            />
+            <span>Aracı kurum / yatırım hesabı (birikim alım-satımında hedef hesap olarak kullanılır)</span>
           </label>
           <label>
             <span>Sıra</span>

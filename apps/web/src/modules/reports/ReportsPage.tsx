@@ -6,19 +6,31 @@ import type {
 } from "@defterx/contracts";
 
 import { ReportChart } from "../../components/charts";
+import { ExportMenu } from "../../components/ui";
 import type { AccountView } from "../../finance";
 import type { ReportRange } from "../../finance/finance-state";
+import { today } from "../../lib/date";
 import { money, moneyInCurrency, toNumber } from "../../lib/format";
+import { exportTableToExcel, exportTableToPdf, type ExportTable } from "../../lib/table-export";
 import { ReportFilters } from "./ReportFilters";
 import {
   accountBalanceOption,
   categoryDistributionOption,
   costCenterDistributionOption,
   liquidityOption,
-  netWorthOption,
+  netWorthBreakdown,
+  netWorthTreemapOption,
   reportChartColors,
   trendOption,
 } from "./report-chart-options";
+import {
+  accountBalancesTable,
+  categoryDetailTable,
+  liquidityEventsTable,
+  netWorthPerformanceTable,
+  reportDate,
+  reportPeriodMeta,
+} from "./report-export";
 
 export type ReportCategoryItem = Pick<
   IncomeExpenseReportItemDTO,
@@ -35,6 +47,7 @@ export interface ReportsPageProps {
   items?: readonly ReportCategoryItem[];
   loadFailed?: boolean;
   onFilterChange?: (filter: ReportRange) => Promise<unknown>;
+  onNotify?: (message: string) => void;
   range?: ReportRange;
 }
 
@@ -48,10 +61,6 @@ const tabs: ReadonlyArray<{ key: ReportKey; label: string }> = [
   { key: "netWorth", label: "Varlık ve yatırım" },
 ];
 
-function reportDate(value: string): string {
-  return new Intl.DateTimeFormat("tr-TR", { dateStyle: "medium" }).format(new Date(value));
-}
-
 function sum(values: readonly string[]): number {
   return values.reduce((total, value) => total + Number(value), 0);
 }
@@ -64,6 +73,7 @@ export function ReportsPage({
   items = [],
   loadFailed = false,
   onFilterChange = () => Promise.resolve(),
+  onNotify = () => {},
   range = {},
 }: ReportsPageProps) {
   const [active, setActive] = useState<ReportKey>("trend");
@@ -120,6 +130,30 @@ export function ReportsPage({
     (!detailCategoryId || transaction.categoryId === detailCategoryId)
     && (!detailCostCenterId || transaction.costCenterId === detailCostCenterId));
 
+  const netWorthTree = useMemo(
+    () => (analytics ? netWorthBreakdown(analytics.netWorth) : { nodes: [], charted: 0, debt: 0 }),
+    [analytics],
+  );
+
+  const exportMeta = useMemo(() => {
+    if (!analytics) return [];
+    const selected = range.accountIds;
+    const accountSummary = !selected || selected.length >= accounts.length
+      ? "Tüm hesaplar"
+      : `${selected.length} hesap: ${accounts
+          .filter((account) => selected.includes(account.id))
+          .map((account) => account.name)
+          .join(", ")}`;
+    return reportPeriodMeta(analytics.from, analytics.to, accountSummary);
+  }, [accounts, analytics, range.accountIds]);
+
+  const exportActions = (table: ExportTable, filenameBase: string) => ({
+    onExcel: () => exportTableToExcel(table, `${filenameBase}-${today()}`),
+    onPdf: () => {
+      if (!exportTableToPdf(table)) onNotify("PDF için tarayıcı açılır pencere iznini verin.");
+    },
+  });
+
   const boundedRate = Math.max(0, Math.min(100, savingsRate));
   const scoreStyle: CSSProperties = {
     background: `radial-gradient(closest-side,#f5f8f6 78%,transparent 79% 100%),conic-gradient(var(--forest-700) ${boundedRate}%,#dce7e1 0)`,
@@ -163,7 +197,12 @@ export function ReportsPage({
 
       {active === "balances" && analytics ? (
         <article className="panel report-main-panel">
-          <header className="panel-head"><div><h2>Hesap Bakiyesi Gelişimi</h2><p>Her hesabın dönem sonu bakiyesi ayrı çizgide gösterilir</p></div></header>
+          <header className="panel-head">
+            <div><h2>Hesap Bakiyesi Gelişimi</h2><p>Her hesabın dönem sonu bakiyesi ayrı çizgide gösterilir</p></div>
+            {analytics.accountBalances.accounts.length > 0 ? (
+              <ExportMenu {...exportActions(accountBalancesTable(analytics.accountBalances, exportMeta), "defterx-hesap-bakiyeleri")} />
+            ) : null}
+          </header>
           <ReportChart busy={busy} height={410} label="Hesap bakiyesi gelişimi" option={accountBalanceOption(analytics.accountBalances)} />
           <div className="report-table-wrap"><table className="report-table"><thead><tr><th>Hesap</th><th>Son bakiye</th></tr></thead><tbody>
             {analytics.accountBalances.accounts.map((account) => {
@@ -216,7 +255,12 @@ export function ReportsPage({
           </article>
           {analytics ? (
             <article className="panel report-detail-panel">
-              <header className="panel-head"><div><h2>Kategori → Masraf Merkezi → İşlem</h2><p>Bir kırılım seçerek kaynak işlemlere inin</p></div></header>
+              <header className="panel-head">
+                <div><h2>Kategori → Masraf Merkezi → İşlem</h2><p>Bir kırılım seçerek kaynak işlemlere inin</p></div>
+                {detailTransactions.length > 0 ? (
+                  <ExportMenu {...exportActions(categoryDetailTable(detailTransactions, exportMeta), "defterx-kategori-detayi")} />
+                ) : null}
+              </header>
               <div className="report-drill-filters">
                 <label><span>Kategori</span><select value={detailCategoryId} onChange={(event) => setDetailCategoryId(event.target.value)}><option value="">Tüm kategoriler</option>{analyticsCategories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
                 <label><span>Masraf merkezi</span><select value={detailCostCenterId} onChange={(event) => setDetailCostCenterId(event.target.value)}><option value="">Tüm merkezler</option>{costCenterRows.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
@@ -239,7 +283,12 @@ export function ReportsPage({
             <article><span>Tahmini dönem sonu</span><strong>{money(Number(analytics.liquidity.items.at(-1)?.projectedBalance ?? analytics.liquidity.openingBalance))}</strong></article>
           </div>
           <article className="panel report-main-panel">
-            <header className="panel-head"><div><h2>Likidite ve Nakit Tahmini</h2><p>Başlangıç bakiyesi, gerçekleşen işlemler ve bekleyen planlı işlemlerin birleşik projeksiyonu</p></div></header>
+            <header className="panel-head">
+              <div><h2>Likidite ve Nakit Tahmini</h2><p>Başlangıç bakiyesi, gerçekleşen işlemler ve bekleyen planlı işlemlerin birleşik projeksiyonu</p></div>
+              {analytics.liquidity.events.length > 0 ? (
+                <ExportMenu {...exportActions(liquidityEventsTable(analytics.liquidity, exportMeta), "defterx-likidite-planlar")} />
+              ) : null}
+            </header>
             <ReportChart busy={busy} height={390} label="Likidite ve nakit tahmini" option={liquidityOption(analytics.liquidity.items)} />
             <div className="report-table-wrap"><table className="report-table"><thead><tr><th>Tarih</th><th>Planlı işlem</th><th>Tür</th><th>Etki</th></tr></thead><tbody>
               {analytics.liquidity.events.map((event) => <tr key={event.id}><td>{reportDate(event.scheduledAt)}</td><td>{event.title}</td><td>{event.type}</td><td className={Number(event.impact) >= 0 ? "positive" : "negative"}>{money(Number(event.impact))}</td></tr>)}
@@ -258,9 +307,29 @@ export function ReportsPage({
             <article><span>Gerçekleşmemiş getiri</span><strong>{money(Number(analytics.netWorth.unrealizedGain))}</strong></article>
             <article style={{padding: "12px 14px"}}><span>Toplam</span><strong style={{fontSize: "15px"}}>{money(Number(analytics.netWorth.investmentCost) + Number(analytics.netWorth.unrealizedGain))}</strong></article>
           </div>
-          <div className="report-net-worth-grid">
-            <article className="panel"><header className="panel-head"><div><h2>Toplam Varlık</h2><p>Seçili hesaplar ve son bilinen yatırım fiyatları</p></div></header><ReportChart busy={busy} height={330} label="Toplam varlık dağılımı" option={netWorthOption(analytics.netWorth)} /></article>
-            <article className="panel report-main-panel"><header className="panel-head"><div><h2>Yatırım Performansı</h2><p>Bitiş tarihindeki pozisyon ve seçili dönemde gerçekleşen getiri</p></div></header>
+          <article className="panel net-worth-treemap-panel">
+            <header className="panel-head"><div>
+              <h2>Varlık Dağılımı</h2>
+              <p>Görünen varlık <b>{money(netWorthTree.charted)}</b> · nakit ve yatırımlar tür → hesap / enstrüman kırılımında; bir bloğa tıklayıp inin, üstteki yoldan geri dönün</p>
+            </div></header>
+            {netWorthTree.nodes.length > 0 ? (
+              <ReportChart busy={busy} height={430} label="Varlık dağılımı ağacı" option={netWorthTreemapOption(analytics.netWorth)} />
+            ) : (
+              <div className="empty-state">Seçilen kapsamda nakit veya yatırım varlığı yok.</div>
+            )}
+            {netWorthTree.debt < 0 ? (
+              <p className="report-net-worth-note">
+                Eksi bakiye / kredi kartı borcu <b className="negative">{money(netWorthTree.debt)}</b> grafiğe dahil değildir.
+              </p>
+            ) : null}
+          </article>
+          <article className="panel report-main-panel">
+            <header className="panel-head">
+              <div><h2>Yatırım Performansı</h2><p>Bitiş tarihindeki pozisyon ve seçili dönemde gerçekleşen getiri</p></div>
+              {analytics.netWorth.items.length > 0 ? (
+                <ExportMenu {...exportActions(netWorthPerformanceTable(analytics.netWorth, exportMeta), "defterx-yatirim-performansi")} />
+              ) : null}
+            </header>
               <div className="report-table-wrap"><table className="report-table"><thead><tr><th>Varlık</th><th>Döviz</th><th>Maliyet</th><th>Güncel değer</th><th>Gerçekleşen</th><th>Gerçekleşmemiş</th><th>Toplam</th></tr></thead><tbody>
                 {analytics.netWorth.items.map((item) => {
                   const foreign = item.currencyCode !== "TRY";
@@ -309,7 +378,6 @@ export function ReportsPage({
                 ) : null}
               </tbody></table></div>
             </article>
-          </div>
         </>
       ) : null}
     </section>

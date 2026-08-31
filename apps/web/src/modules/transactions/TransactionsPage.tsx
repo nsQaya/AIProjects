@@ -3,6 +3,7 @@ import type { CategoryDTO, CostCenterDTO, UUID } from "@defterx/contracts";
 
 import { Button, ConfirmDialog, InlineFeedback } from "../../components/ui";
 import type { AccountView, TransactionView } from "../../finance/finance-views";
+import { FxConversionDialog, type FxConversionValues } from "../fx";
 import { downloadCsv, type CsvValue } from "../../lib/csv";
 import { dateText, money } from "../../lib/format";
 import { today } from "../../lib/date";
@@ -16,6 +17,7 @@ interface TransactionsPageProps {
   categories: readonly CategoryDTO[];
   costCenters: readonly CostCenterDTO[];
   loading?: boolean;
+  onCreateFxConversion?: (values: FxConversionValues) => Promise<unknown>;
   onDelete: (transaction: TransactionView) => Promise<void>;
   onEdit: (transaction: TransactionView) => void;
   onLedgerFilterChange: (filter: TransactionLedgerFilter) => Promise<void>;
@@ -54,6 +56,7 @@ export function TransactionsPage({
   categories,
   costCenters,
   loading = false,
+  onCreateFxConversion,
   onDelete,
   onEdit,
   onLedgerFilterChange,
@@ -61,6 +64,7 @@ export function TransactionsPage({
   openingBalance,
   transactions,
 }: TransactionsPageProps) {
+  const [fxDialogOpen, setFxDialogOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [kind, setKind] = useState<KindFilter>("");
   const [from, setFrom] = useState("");
@@ -245,7 +249,12 @@ export function TransactionsPage({
       <article className="panel transaction-panel" aria-busy={loading || undefined}>
         <header className="panel-head">
           <div><h2>İşlem defteri</h2><p id="transaction-result-count">{rows.length} kayıt bulundu</p></div>
-          <Button id="export-transactions" onClick={exportRows}>Dışa aktar (.csv)</Button>
+          <div className="intro-actions">
+            {onCreateFxConversion ? (
+              <Button id="open-fx-conversion" onClick={() => setFxDialogOpen(true)}>Döviz al/sat</Button>
+            ) : null}
+            <Button id="export-transactions" onClick={exportRows}>Dışa aktar (.csv)</Button>
+          </div>
         </header>
         <div className="transaction-table expanded transaction-ledger" id="all-transactions">
           <div className="table-head"><span>İşlem</span><span>Masraf merkezi</span><span>Kategori</span><span>Hesap</span><span>Tarih</span><span>Tutar</span><span>Yürüyen bakiye</span><span>İşlemler</span></div>
@@ -317,6 +326,18 @@ export function TransactionsPage({
           errorFormatter={errorMessage}
           onClose={() => setTransactionToDelete(null)}
           onConfirm={() => onDelete(transactionToDelete)}
+        />
+      ) : null}
+      {fxDialogOpen && onCreateFxConversion ? (
+        <FxConversionDialog
+          accounts={accounts.map((account) => ({
+            id: account.id,
+            name: account.name,
+            currencyCode: account.currencyCode,
+            isArchived: account.isArchived,
+          }))}
+          onClose={() => setFxDialogOpen(false)}
+          onSubmit={onCreateFxConversion}
         />
       ) : null}
     </section>

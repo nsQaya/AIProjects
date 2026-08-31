@@ -187,6 +187,18 @@ export interface InvestmentValueSeriesItemDTO {
   value: MoneyString;
 }
 
+/** One in-scope account's cash as of the report end date, used for the net-worth breakdown. */
+export interface NetWorthCashAccountDTO {
+  accountId: UUID;
+  name: string;
+  accountTypeName: string;
+  currencyCode: CurrencyCode;
+  /** Balance in the account's own currency. */
+  balance: MoneyString;
+  /** balance converted to the book base currency at the latest known TCMB rate ("0" for a foreign account with no rate). */
+  balanceTry: MoneyString;
+}
+
 export interface ReportAnalyticsResponse {
   from: ISODateTimeString;
   to: ISODateTimeString;
@@ -214,6 +226,7 @@ export interface ReportAnalyticsResponse {
     realizedGain: MoneyString;
     unrealizedGain: MoneyString;
     totalAssets: MoneyString;
+    cashAccounts: NetWorthCashAccountDTO[];
     items: InvestmentPerformanceItemDTO[];
   };
 }

@@ -14,10 +14,14 @@ import type {
   CreateInvestmentAssetTypeResponse,
   CreateInvestmentInstrumentRequest,
   CreateInvestmentInstrumentResponse,
+  CreateInvestmentCapitalIncreaseRequest,
+  CreateInvestmentCapitalIncreaseResponse,
   CreateInvestmentLotRequest,
   CreateInvestmentLotResponse,
   CreateInvestmentSaleRequest,
   CreateInvestmentSaleResponse,
+  CreateFxConversionRequest,
+  CreateFxConversionResponse,
   CreateScheduledTransactionRequest,
   CreateScheduledTransactionResponse,
   CreateTransactionRequest,
@@ -41,6 +45,7 @@ import type {
   InvestmentPricesAtDateResponse,
   MarketPriceSyncRunDTO,
   MarketSymbolListResponse,
+  RealizeScheduledTransactionRequest,
   RealizeScheduledTransactionResponse,
   ReceivablePayableReportResponse,
   ReportAnalyticsResponse,
@@ -137,6 +142,7 @@ import {
   deleteInvestmentSaleResponseSchema,
   investmentAssetTypeListSchema,
   investmentAssetTypeSchema,
+  investmentBrokerageAccountListSchema,
   investmentInstrumentListSchema,
   investmentInstrumentSchema,
   investmentLotListSchema,
@@ -166,6 +172,7 @@ import {
   disableCurrencyResponseSchema,
   enableCurrencyResponseSchema,
 } from "./schemas/currencies";
+import { fxConversionSchema } from "./schemas/fx";
 
 export interface FinanceAPIClient {
   readonly session: AuthSession | null;
@@ -206,12 +213,19 @@ export type CreateFinanceScheduledInput = Omit<
   "bookId" | "currencyCode"
 > & { currencyCode?: string };
 
+/** Edits applied over a plan's own values when realizing it into a transaction. */
+export type RealizeScheduledOverrides = Omit<
+  RealizeScheduledTransactionRequest,
+  "version" | "clientOperationId"
+>;
+
 export type CreateFinanceAssetTypeInput = Omit<CreateInvestmentAssetTypeRequest, "bookId">;
 export type CreateFinanceInstrumentInput = Omit<
   CreateInvestmentInstrumentRequest,
   "bookId" | "currencyCode"
 > & { currencyCode?: string };
 export type CreateFinanceLotInput = Omit<CreateInvestmentLotRequest, "bookId">;
+export type CreateFinanceCapitalIncreaseInput = Omit<CreateInvestmentCapitalIncreaseRequest, "bookId">;
 export type CreateFinanceSaleInput = Omit<
   CreateInvestmentSaleRequest,
   "bookId" | "clientOperationId"
@@ -219,6 +233,10 @@ export type CreateFinanceSaleInput = Omit<
 export type UpdateFinanceSaleInput = Omit<
   UpdateInvestmentSaleRequest,
   "clientOperationId" | "reversalClientOperationId"
+>;
+export type CreateFinanceFxConversionInput = Omit<
+  CreateFxConversionRequest,
+  "bookId" | "clientOperationId"
 >;
 
 export interface TransactionLoadResult {
@@ -434,7 +452,7 @@ export class FinanceService {
         ? this.#state.reportRange
         : { ...range, granularity: "month" };
 
-      const [dashboard, cashflow, analytics, types, instruments, lots, sales, portfolio] =
+      const [dashboard, cashflow, analytics, types, instruments, lots, sales, portfolio, brokerageAccounts] =
         await Promise.all([
           this.#api.request(
             `/api/v1/reports/dashboard?${buildQuery({ bookId: book.id, ...range, _: revision })}`,
@@ -475,6 +493,9 @@ export class FinanceService {
           this.#api.request(`/api/v1/investments/portfolio?${baseQuery}`, {
             schema: investmentPortfolioSchema,
           }),
+          this.#api.request(`/api/v1/investments/brokerage-accounts?${baseQuery}`, {
+            schema: investmentBrokerageAccountListSchema,
+          }),
         ]);
 
       if (refreshSequence !== this.#refreshSequence) return this.#state;
@@ -504,6 +525,7 @@ export class FinanceService {
         lots: lots.items.map(investmentLotView),
         sales: sales.items.map(investmentSaleView),
         portfolio: portfolio.items.map(investmentPortfolioItemView),
+        brokerageAccounts: brokerageAccounts.items,
         ...(transactionSequence === this.#transactionSequence
           ? this.#transactionPatch(transactionsResponse, {})
           : {}),
@@ -911,11 +933,12 @@ export class FinanceService {
   realizeScheduled(
     id: UUID,
     version: number,
-    transactionDate = this.#now().toISOString(),
+    overrides: RealizeScheduledOverrides = {},
   ): Promise<RealizeScheduledTransactionResponse> {
+    const { transactionDate = this.#now().toISOString(), ...edits } = overrides;
     return this.#api.request(`/api/v1/scheduled-transactions/${id}/realize`, {
       method: "POST",
-      body: { version, transactionDate, clientOperationId: this.#randomUUID() },
+      body: { version, transactionDate, clientOperationId: this.#randomUUID(), ...edits },
       schema: realizeScheduledTransactionResponseSchema,
     });
   }
@@ -1087,6 +1110,16 @@ export class FinanceService {
     );
   }
 
+  createCapitalIncrease(
+    input: CreateFinanceCapitalIncreaseInput,
+  ): Promise<CreateInvestmentCapitalIncreaseResponse> {
+    return this.#api.request("/api/v1/investments/capital-increases", {
+      method: "POST",
+      body: { bookId: this.bookId(), ...input },
+      schema: investmentLotSchema,
+    });
+  }
+
   createSale(input: CreateFinanceSaleInput): Promise<CreateInvestmentSaleResponse> {
     return this.#api.request("/api/v1/investments/sales", {
       method: "POST",
@@ -1112,6 +1145,14 @@ export class FinanceService {
       `/api/v1/investments/sales/${id}?${buildQuery({ version })}`,
       { method: "DELETE", schema: deleteInvestmentSaleResponseSchema },
     );
+  }
+
+  createFxConversion(input: CreateFinanceFxConversionInput): Promise<CreateFxConversionResponse> {
+    return this.#api.request("/api/v1/fx/conversions", {
+      method: "POST",
+      body: { bookId: this.bookId(), clientOperationId: this.#randomUUID(), ...input },
+      schema: fxConversionSchema,
+    });
   }
 
   #transactionMutation(input: CreateFinanceTransactionInput): CreateTransactionRequest {

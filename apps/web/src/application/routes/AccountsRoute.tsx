@@ -8,6 +8,7 @@ export function AccountsRoute() {
     <AccountsPage
       accounts={snapshot.accounts}
       accountTypes={snapshot.accountTypes.filter((accountType) => accountType.isActive)}
+      currencies={snapshot.currencies}
       busy={mutationBusy}
       onCreateAccount={(values) =>
         mutate(

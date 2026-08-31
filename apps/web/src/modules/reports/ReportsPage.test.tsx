@@ -26,6 +26,7 @@ function reportAccount(id: string, name: string): AccountView {
     accountTypeId: "00000000-0000-4000-8000-000000000099",
     accountTypeName: "Banka",
     accountTypeIcon: null,
+    isInvestment: false,
     normalBalance: "DEBIT",
     currencyCode: "TRY",
     allowNegativeBalance: false,
@@ -35,6 +36,8 @@ function reportAccount(id: string, name: string): AccountView {
     version: 1,
     balance: "0",
     displayBalance: "0",
+    displayBalanceTry: "0",
+    openingBalance: "0",
     availableCredit: null,
     ui: {
       balance: 0,
@@ -70,6 +73,9 @@ function analyticsFixture(): ReportAnalyticsResponse {
     investmentValueSeries: [{ period: "2026-08", periodStart: "2026-08-01T00:00:00.000Z", value: "1200" }],
     netWorth: {
       cashBalance: "1600", investmentCost: "1000", investmentValue: "1200", realizedGain: "50", unrealizedGain: "200", totalAssets: "2800",
+      cashAccounts: [
+        { accountId: ACCOUNT_ID, name: "Banka", accountTypeName: "Banka", currencyCode: "TRY", balance: "1600", balanceTry: "1600" },
+      ],
       items: [{ instrumentId: INSTRUMENT_ID, name: "Fon", symbol: "FON", assetTypeName: "Yatırım Fonu", currencyCode: "TRY", quantity: "10", costBasis: "1000", currentValue: "1200", realizedGain: "50", unrealizedGain: "200", latestPriceAt: "2026-08-14T10:00:00.000Z", currentValueTRY: "1200", unrealizedGainTRY: "200", costBasisTRY: "1000", realizedGainTRY: "50" }],
     },
   };
@@ -224,5 +230,24 @@ describe("ReportsPage", () => {
     expect(screen.getByText("Beklenen ödeme")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Varlık ve yatırım" }));
     expect(screen.getByText("Fon")).toBeInTheDocument();
+  });
+
+  it("offers Excel and PDF export on the investment performance table", async () => {
+    const user = userEvent.setup();
+    const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
+    const notify = vi.fn();
+    render(<ReportsPage analytics={analyticsFixture()} onNotify={notify} />);
+
+    await user.click(screen.getByRole("button", { name: "Varlık ve yatırım" }));
+    const performancePanel = screen
+      .getByRole("heading", { name: "Yatırım Performansı" })
+      .closest<HTMLElement>(".panel")!;
+    await user.click(within(performancePanel).getByText("Dışa aktar"));
+    expect(within(performancePanel).getByRole("button", { name: "Excel" })).toBeInTheDocument();
+
+    await user.click(within(performancePanel).getByRole("button", { name: "PDF" }));
+    expect(openSpy).toHaveBeenCalled();
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("açılır pencere"));
+    openSpy.mockRestore();
   });
 });

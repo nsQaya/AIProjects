@@ -4,6 +4,7 @@ import type { CreateAccountTypeInput, UpdateAccountTypeInput } from "./account-t
 
 const projection = `id,book_id AS "bookId",name,icon,normal_balance AS "normalBalance",
   default_allow_negative_balance AS "defaultAllowNegativeBalance",purpose,
+  is_investment AS "isInvestment",
   is_system AS "isSystem",is_active AS "isActive",sort_order AS "sortOrder",version`;
 
 export async function listAccountTypes(client: DbClient, bookId: string, includeInactive = false) {
@@ -28,9 +29,9 @@ export async function accountTypeBookId(client: DbClient, id: string) {
 export async function createAccountType(client: DbClient, userId: string, input: CreateAccountTypeInput) {
   return inTransaction(client, async (transaction) => {
     const result = await transaction.query(
-      `INSERT INTO account_types(book_id,name,icon,normal_balance,default_allow_negative_balance,sort_order)
-       VALUES($1,$2,$3,$4,$5,$6) RETURNING ${projection}`,
-      [input.bookId,input.name,input.icon??null,input.normalBalance,input.defaultAllowNegativeBalance,input.sortOrder],
+      `INSERT INTO account_types(book_id,name,icon,normal_balance,default_allow_negative_balance,is_investment,sort_order)
+       VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING ${projection}`,
+      [input.bookId,input.name,input.icon??null,input.normalBalance,input.defaultAllowNegativeBalance,input.isInvestment,input.sortOrder],
     );
     await audit(transaction,input.bookId,userId,result.rows[0].id,"CREATE",result.rows[0]);
     return result.rows[0];
@@ -55,10 +56,11 @@ export async function updateAccountType(client: DbClient, userId: string, id: st
          icon=CASE WHEN $3::boolean THEN $4 ELSE icon END,
          normal_balance=COALESCE($5,normal_balance),
          default_allow_negative_balance=COALESCE($6,default_allow_negative_balance),
-         sort_order=COALESCE($7,sort_order),is_active=COALESCE($8,is_active),
+         is_investment=COALESCE($7,is_investment),
+         sort_order=COALESCE($8,sort_order),is_active=COALESCE($9,is_active),
          updated_at=now(),version=version+1
-       WHERE id=$1 AND version=$9 RETURNING ${projection}`,
-      [id,input.name??null,input.icon!==undefined,input.icon??null,input.normalBalance??null,input.defaultAllowNegativeBalance??null,input.sortOrder??null,input.isActive??null,input.version],
+       WHERE id=$1 AND version=$10 RETURNING ${projection}`,
+      [id,input.name??null,input.icon!==undefined,input.icon??null,input.normalBalance??null,input.defaultAllowNegativeBalance??null,input.isInvestment??null,input.sortOrder??null,input.isActive??null,input.version],
     );
     if (!result.rows[0]) throw new AppError(409, "VERSION_CONFLICT", "Account type changed on another device");
     await audit(transaction,accountType.book_id,userId,id,"UPDATE",result.rows[0]);

@@ -19,6 +19,7 @@ import { recurringRoutes } from "./modules/recurring-transactions/recurring.rout
 import { reportRoutes } from "./modules/reports/report.routes";
 import { syncRoutes } from "./modules/sync/sync.routes";
 import { investmentRoutes } from "./modules/investments/investment.routes";
+import { fxRoutes } from "./modules/fx/fx.routes";
 import { currencyRoutes } from "./modules/currency/currency.routes";
 import { openApiYaml } from "./docs/openapi";
 import { withDatabase } from "./infrastructure/database";
@@ -59,11 +60,12 @@ app.get("/health/ready", async (c) => {
         AND has_table_privilege(current_user,'public.currency_daily_rates','SELECT,INSERT,UPDATE,DELETE') AS tables_ready,
       has_sequence_privilege(current_user,'public.transaction_number_seq','USAGE') AS sequence_ready`));
     const checks = result.rows[0]!;
-    const ready = checks.migration_count === 19 && checks.schema_ready && checks.tables_ready
+    const expectedMigrations = 24;
+    const ready = checks.migration_count === expectedMigrations && checks.schema_ready && checks.tables_ready
       && checks.sequence_ready && secretBytes >= 32 && pepperBytes >= 32 && passwordResetPepperBytes >= 32;
     return c.json({ status: ready ? "ready" : "not_ready", checks: {
       database: true,
-      migrations: checks.migration_count === 19,
+      migrations: checks.migration_count === expectedMigrations,
       schema: checks.schema_ready,
       tablePrivileges: checks.tables_ready,
       sequencePrivileges: checks.sequence_ready,
@@ -92,6 +94,7 @@ app.route("/api/v1/scheduled-transactions", scheduledRoutes);
 app.route("/api/v1/recurring-transactions", recurringRoutes);
 app.route("/api/v1/reports", reportRoutes);
 app.route("/api/v1/investments", investmentRoutes);
+app.route("/api/v1/fx", fxRoutes);
 app.route("/api/v1/currencies", currencyRoutes);
 app.route("/api/v1/sync", syncRoutes);
 app.notFound((c) => c.json({ error: { code: "NOT_FOUND", message: "Route was not found", requestId: c.get("requestId") } }, 404));

@@ -73,7 +73,7 @@ export const investmentPriceAtDateSchema = z.object({
   priceDate: z.string(),
   price: decimalStringSchema,
   available: z.boolean(),
-  source: z.enum(["YAHOO","MANUAL","MISSING"]),
+  source: z.enum(["YAHOO","YAHOO_LIVE","MANUAL","MISSING"]),
 });
 
 export const investmentPricesAtDateSchema = itemListSchema(investmentPriceAtDateSchema);
@@ -109,6 +109,8 @@ export const investmentLotSchema = z.object({
   costBasis: decimalStringSchema,
   purchasedAt: isoDateTimeSchema,
   notes: z.string().nullable(),
+  kind: z.enum(["PURCHASE", "CAPITAL_INCREASE"]),
+  posted: z.boolean(),
   version: versionSchema,
 });
 
@@ -135,6 +137,17 @@ export const investmentPortfolioItemSchema = z.object({
 });
 
 export const investmentPortfolioSchema = itemListSchema(investmentPortfolioItemSchema);
+
+export const investmentBrokerageAccountSchema = z.object({
+  id: uuidSchema,
+  name: z.string(),
+  currencyCode: currencyCodeSchema,
+  displayBalance: decimalStringSchema,
+  displayBalanceTry: decimalStringSchema,
+  isArchived: z.boolean(),
+});
+
+export const investmentBrokerageAccountListSchema = itemListSchema(investmentBrokerageAccountSchema);
 
 export const investmentSaleSchema = z.object({
   id: uuidSchema,

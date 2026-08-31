@@ -6,7 +6,7 @@ import { Icon } from "../../components/ui/Icon";
 import type { CashFlowRange } from "../../finance";
 import { today } from "../../lib/date";
 import { errorMessage } from "../../lib/error-message";
-import { dateText, money, signedMoney } from "../../lib/format";
+import { dateText, money, signedMoney, toNumber } from "../../lib/format";
 import { CashFlowChart } from "./CashFlowChart";
 import { dateIsInWindow, recentDateWindow, upcomingDateWindow } from "./dashboard-range";
 import type { DashboardPageProps } from "./dashboard-types";
@@ -95,7 +95,10 @@ export function DashboardPage({
   const accountsSequence = useRef(0);
 
   const activeAccounts = snapshot.accounts.filter((account) => !account.isArchived);
-  const netBalance = activeAccounts.reduce((sum, account) => sum + account.ui.displayBalance, 0);
+  const netBalance = activeAccounts.reduce(
+    (sum, account) => sum + toNumber(account.displayBalanceTry),
+    0,
+  );
   const openUpcoming = snapshot.upcoming.filter(
     (item) => item.status === "PENDING" || item.status === "OVERDUE",
   );

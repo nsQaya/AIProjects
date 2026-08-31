@@ -19,6 +19,7 @@ export const updateAccountSchema = z.object({
   accountTypeId: uuid.optional(),
   allowNegativeBalance: z.boolean().optional(),
   creditLimit: nonnegativeMoney.nullable().optional(),
+  openingBalance: nonnegativeMoney.optional(),
   isArchived: z.boolean().optional(),
   sortOrder: z.number().int().optional(),
   version: z.number().int().positive()

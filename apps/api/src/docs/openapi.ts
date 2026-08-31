@@ -93,7 +93,7 @@ paths:
     get: { summary: Group upcoming items, responses: { '200': { description: Upcoming groups } } }
     post: { summary: Create one-time or recurring scheduled transactions, responses: { '201': { description: Created } } }
   /scheduled-transactions/{scheduledId}/realize:
-    post: { summary: Atomically post a scheduled item and mark it completed, responses: { '200': { description: Realized and linked transaction } } }
+    post: { summary: Atomically post a scheduled item (optionally with edited type/account/category/cost-center/title/amount/date overrides) and mark it completed, responses: { '200': { description: Realized and linked transaction } } }
   /recurring-transactions:
     get: { summary: List recurring templates, responses: { '200': { description: Templates } } }
     post: { summary: Create recurring template, responses: { '201': { description: Created } } }
@@ -102,7 +102,7 @@ paths:
   /reports/cash-flow:
     get: { summary: Cash flow grouped by day, week, month or year, responses: { '200': { description: Cash flow periods } } }
   /reports/analytics:
-    get: { summary: Five-report analytics suite with trend, account history, category drill-down, liquidity forecast and investment performance, parameters: [{ in: query, name: from, schema: { type: string, format: date-time } }, { in: query, name: to, schema: { type: string, format: date-time } }, { in: query, name: accountIds, description: Comma-separated account UUIDs; omit for all or use none for no accounts, schema: { type: string } }, { in: query, name: granularity, schema: { type: string, enum: [day, week, month, year] } }], responses: { '200': { description: Analytics datasets }, '422': { description: Invalid range or account filter } } }
+    get: { summary: Five-report analytics suite with trend, account history, category drill-down, liquidity forecast and investment performance (net worth includes a per-account cash breakdown for the asset-distribution chart), parameters: [{ in: query, name: from, schema: { type: string, format: date-time } }, { in: query, name: to, schema: { type: string, format: date-time } }, { in: query, name: accountIds, description: Comma-separated account UUIDs; omit for all or use none for no accounts, schema: { type: string } }, { in: query, name: granularity, schema: { type: string, enum: [day, week, month, year] } }], responses: { '200': { description: Analytics datasets }, '422': { description: Invalid range or account filter } } }
   /reports/income-expense:
     get: { summary: Income and expense by category with signed cost-center breakdown, parameters: [{ in: query, name: from, schema: { type: string, format: date-time } }, { in: query, name: to, schema: { type: string, format: date-time } }, { in: query, name: accountIds, description: Comma-separated account UUIDs; omit for all or use none for no accounts, schema: { type: string } }], responses: { '200': { description: Report } } }
   /reports/balances:

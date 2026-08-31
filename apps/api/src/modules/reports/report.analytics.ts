@@ -60,7 +60,7 @@ export async function loadReportAnalytics(
   const scopeValues = [bookId, from, to, accountIds, includeAllAccounts];
   const seriesValues = [...scopeValues, granularity, interval, format];
 
-  const [book, trend, accountBalances, breakdown, transactions, liquidity, events, investments, investmentValues, cash] =
+  const [book, trend, accountBalances, breakdown, transactions, liquidity, events, investments, investmentValues, cash, cashAccounts] =
     await Promise.all([
       pool.query<{ currencyCode: string }>(
         `SELECT base_currency AS "currencyCode" FROM books WHERE id=$1 AND deleted_at IS NULL`,
@@ -112,7 +112,8 @@ export async function loadReportAnalytics(
                 to_char(p.bucket,$8) period,p.bucket AS "periodStart",COALESCE(b.balance,0)::text balance
          FROM periods p CROSS JOIN selected_accounts sa
          LEFT JOIN LATERAL (
-           SELECT COALESCE(SUM(CASE WHEN e.direction='DEBIT' THEN e.base_amount ELSE -e.base_amount END),0) balance
+           -- per-account balance, shown in the account's own currency
+           SELECT COALESCE(SUM(CASE WHEN e.direction='DEBIT' THEN e.amount ELSE -e.amount END),0) balance
            FROM transaction_entries e
            JOIN transactions t ON t.id=e.transaction_id AND t.status='POSTED' AND t.transaction_type<>'REVERSAL'
            WHERE e.account_id=sa.id AND t.transaction_date < p.bucket+$7::interval
@@ -349,13 +350,52 @@ export async function loadReportAnalytics(
         seriesValues,
       ),
       pool.query<{ cashBalance: string }>(
-        `WITH selected_accounts AS (${accountScope})
-         SELECT COALESCE(SUM(CASE WHEN e.direction='DEBIT' THEN e.base_amount ELSE -e.base_amount END),0)::text AS "cashBalance"
-         FROM selected_accounts sa
-         JOIN transaction_entries e ON e.account_id=sa.id
-         JOIN transactions t ON t.id=e.transaction_id AND t.status='POSTED' AND t.transaction_type<>'REVERSAL'
-         WHERE t.transaction_date <= $3::timestamptz
-           AND $2::timestamptz <= $3::timestamptz`,
+        // Net worth needs every selected account's cash in the book base
+        // currency: sum each account in its own currency (e.amount), then value
+        // a foreign balance at its latest TCMB rate. A currency with no rate yet
+        // contributes 0 rather than mixing units.
+        `WITH selected_accounts AS (${accountScope}), per_currency AS (
+           SELECT sa.currency_code,
+             COALESCE(SUM(CASE WHEN e.direction='DEBIT' THEN e.amount ELSE -e.amount END),0) AS native
+           FROM selected_accounts sa
+           JOIN transaction_entries e ON e.account_id=sa.id
+           JOIN transactions t ON t.id=e.transaction_id AND t.status='POSTED' AND t.transaction_type<>'REVERSAL'
+           WHERE t.transaction_date <= $3::timestamptz AND $2::timestamptz <= $3::timestamptz
+           GROUP BY sa.currency_code
+         )
+         SELECT COALESCE(SUM(pc.native * CASE WHEN pc.currency_code='TRY' THEN 1 ELSE COALESCE(fx.try_rate,0) END),0)::text AS "cashBalance"
+         FROM per_currency pc
+         LEFT JOIN LATERAL (
+           SELECT try_rate FROM currency_daily_rates WHERE currency_code=pc.currency_code ORDER BY rate_date DESC LIMIT 1
+         ) fx ON pc.currency_code<>'TRY'`,
+        scopeValues,
+      ),
+      pool.query<{
+        accountId: string; name: string; accountTypeName: string; currencyCode: string;
+        balance: string; balanceTry: string;
+      }>(
+        // Per-account cash as of the report end date, so the net-worth chart can
+        // break "Nakit" down by account type and account. Same scope and rate
+        // handling as the cashBalance total above.
+        `SELECT a.id AS "accountId",a.name,at.name AS "accountTypeName",a.currency_code AS "currencyCode",
+           bal.native::text AS balance,
+           (bal.native * CASE WHEN a.currency_code='TRY' THEN 1 ELSE COALESCE(fx.try_rate,0) END)::text AS "balanceTry"
+         FROM accounts a
+         JOIN account_types at ON at.id=a.account_type_id
+         LEFT JOIN LATERAL (
+           SELECT COALESCE(SUM(CASE WHEN e.direction='DEBIT' THEN e.amount ELSE -e.amount END),0) AS native
+           FROM transaction_entries e
+           JOIN transactions t ON t.id=e.transaction_id AND t.status='POSTED' AND t.transaction_type<>'REVERSAL'
+           WHERE e.account_id=a.id AND t.transaction_date <= $3::timestamptz
+         ) bal ON true
+         LEFT JOIN LATERAL (
+           SELECT try_rate FROM currency_daily_rates WHERE currency_code=a.currency_code ORDER BY rate_date DESC LIMIT 1
+         ) fx ON a.currency_code<>'TRY'
+         WHERE a.book_id=$1 AND a.is_system=false AND a.deleted_at IS NULL
+           AND ($5::boolean OR a.id=ANY($4::uuid[]))
+           AND $2::timestamptz <= $3::timestamptz
+           AND bal.native <> 0
+         ORDER BY bal.native * CASE WHEN a.currency_code='TRY' THEN 1 ELSE COALESCE(fx.try_rate,0) END DESC`,
         scopeValues,
       ),
     ]);
@@ -412,6 +452,7 @@ export async function loadReportAnalytics(
       realizedGain: investmentTotals.totalRealizedGain ?? "0",
       unrealizedGain: investmentTotals.totalUnrealizedGain ?? "0",
       totalAssets,
+      cashAccounts: cashAccounts.rows as ReportAnalyticsResponse["netWorth"]["cashAccounts"],
       items: investmentRows.map(({ investmentCost: _investmentCost, investmentValue: _investmentValue,
         totalRealizedGain: _totalRealizedGain, totalUnrealizedGain: _totalUnrealizedGain, ...row }) => row) as unknown as ReportAnalyticsResponse["netWorth"]["items"],
     },

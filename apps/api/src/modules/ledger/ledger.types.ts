@@ -5,6 +5,8 @@ export interface LedgerMappingInput {
   type: TransactionType;
   amount: string;
   currencyCode: string;
+  /** Book-base-currency (TRY) value of `amount`. Defaults to `amount` for single-currency transactions. */
+  baseAmount?: string;
   accountId: string;
   targetAccountId?: string;
   categoryAccountId?: string;

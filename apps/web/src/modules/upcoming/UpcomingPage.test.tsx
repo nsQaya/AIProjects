@@ -19,6 +19,7 @@ function account(id: string, name: string, isCreditCard: boolean): AccountView {
     accountTypeId: isCreditCard ? "type-credit-card" : "type-cash",
     accountTypeName: name,
     accountTypeIcon: null,
+    isInvestment: false,
     normalBalance: isCreditCard ? "CREDIT" : "DEBIT",
     currencyCode: "TRY",
     allowNegativeBalance: isCreditCard,
@@ -28,6 +29,8 @@ function account(id: string, name: string, isCreditCard: boolean): AccountView {
     version: 1,
     balance: "0.00",
     displayBalance: "0.00",
+    displayBalanceTry: "0.00",
+    openingBalance: "0",
     availableCredit: isCreditCard ? "10000.00" : null,
     ui: {
       balance: 0,
@@ -305,21 +308,16 @@ describe("UpcomingPage", () => {
     expect(actions.onEdit).toHaveBeenCalledWith(pending);
   });
 
-  it("realizes an open record only after confirmation", async () => {
+  it("hands an open record straight to the realize handler without a confirm", async () => {
     const user = userEvent.setup();
-    const confirm = vi.spyOn(globalThis, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+    const confirm = vi.spyOn(globalThis, "confirm");
     const actions = renderPage();
     const realize = within(rowFor(pending.title)).getByRole("button", { name: "Gerçekleşti" });
 
     await user.click(realize);
-    expect(confirm).toHaveBeenLastCalledWith(
-      `“${pending.title}” gerçekleşti olarak işlemlere aktarılsın mı?`,
-    );
-    expect(actions.onRealize).not.toHaveBeenCalled();
-
-    await user.click(realize);
     await waitFor(() => expect(actions.onRealize).toHaveBeenCalledWith(pending));
     expect(actions.onRealize).toHaveBeenCalledOnce();
+    expect(confirm).not.toHaveBeenCalled();
     confirm.mockRestore();
   });
 

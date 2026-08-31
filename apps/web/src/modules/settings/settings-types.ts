@@ -87,6 +87,7 @@ export type SaveAccountTypeInput =
       name: string;
       normalBalance: Direction;
       defaultAllowNegativeBalance: boolean;
+      isInvestment: boolean;
       sortOrder: number;
     }
   | {
@@ -95,6 +96,7 @@ export type SaveAccountTypeInput =
       name: string;
       normalBalance: Direction;
       defaultAllowNegativeBalance: boolean;
+      isInvestment: boolean;
       sortOrder: number;
       version: Version;
     };

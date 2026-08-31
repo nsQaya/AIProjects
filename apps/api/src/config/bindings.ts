@@ -46,11 +46,12 @@ export type BackgroundJob =
   | { type: "SEND_REMINDER"; scheduledTransactionId: string }
   | { type: "SYNC_MARKET_CATALOG" }
   | { type: "ENSURE_MARKET_DATA"; targetDate: string }
-  | { type: "PLAN_MARKET_PRICES"; runId: string; targetDate: string }
+  | { type: "PLAN_MARKET_PRICES"; runId: string; targetDate: string; mode?: PriceSyncMode }
   | {
       type: "FETCH_MARKET_PRICE_BATCH";
       runId: string;
       targetDate: string;
+      mode?: PriceSyncMode;
       batchKey: string;
       items: Array<{ id: string; symbol: string }>;
     }
@@ -61,9 +62,15 @@ export type BackgroundJob =
       type: "FETCH_FUND_PRICE_BATCH";
       runId: string;
       targetDate: string;
+      mode?: PriceSyncMode;
       batchKey: string;
       items: Array<{ id: string; symbol: string }>;
     };
+
+// CLOSE: official daily close bar for targetDate (scheduled end-of-day sync).
+// LIVE: current intraday quote, stamped on targetDate and written whether or not
+// an official bar exists yet (the manual "update every price now" button).
+export type PriceSyncMode = "CLOSE" | "LIVE";
 
 export interface AuthUser { id: string; email: string }
 

@@ -24,6 +24,9 @@ export function TransactionsRoute({ onEdit }: { onEdit: (transaction: Transactio
         );
       }}
       onLedgerFilterChange={(filter) => service.loadTransactions(filter).then(() => undefined)}
+      onCreateFxConversion={(values) =>
+        mutate(() => service.createFxConversion(values), "Döviz işlemi kaydedildi.")
+      }
     />
   );
 }

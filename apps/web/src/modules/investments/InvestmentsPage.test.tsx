@@ -5,6 +5,7 @@ import { isoAtLocalNoon } from "../../lib/date";
 import { InvestmentsPage } from ".";
 import type {
   InvestmentAccountOption,
+  InvestmentBrokerageAccount,
   InvestmentInstrumentOption,
   InvestmentLotViewModel,
   InvestmentPortfolioViewModel,
@@ -12,12 +13,23 @@ import type {
 } from "./investment-types";
 
 const accounts: readonly InvestmentAccountOption[] = [
-  { id: "account-bank", name: "Ana banka", isArchived: false },
+  { id: "account-bank", name: "Piapiri TL", isArchived: false },
   { id: "account-old", name: "Eski yatırım hesabı", isArchived: true },
 ];
 
+const brokerageAccounts: readonly InvestmentBrokerageAccount[] = [
+  {
+    id: "account-bank",
+    name: "Piapiri TL",
+    currencyCode: "TRY",
+    displayBalance: "5000.00",
+    displayBalanceTry: "5000.00",
+    isArchived: false,
+  },
+];
+
 const instruments: readonly InvestmentInstrumentOption[] = [
-  { id: "instrument-fund", name: "Teknoloji Fonu", symbol: "TEFAS", isActive: true },
+  { id: "instrument-fund", name: "Teknoloji Fonu", symbol: "TEFAS", isActive: true, marketSymbolId: "market-tefas" },
   { id: "instrument-old", name: "Eski Fon", symbol: "ESK", isActive: false },
 ];
 
@@ -55,7 +67,27 @@ const lot: InvestmentLotViewModel = {
   costBasis: "250.625",
   purchasedAt: "2026-01-10T09:00:00.000Z",
   notes: "Eski lot",
+  kind: "PURCHASE",
+  posted: true,
   version: 4,
+};
+
+const fundLot: InvestmentLotViewModel = {
+  id: "lot-fund",
+  instrumentId: "instrument-fund",
+  instrumentName: "Teknoloji Fonu",
+  symbol: "TEFAS",
+  currencyCode: "TRY",
+  accountId: "account-bank",
+  accountName: "Piapiri TL",
+  quantity: "12.5000",
+  unitPrice: "100.00",
+  costBasis: "1250.00",
+  purchasedAt: "2026-02-01T09:00:00.000Z",
+  notes: null,
+  kind: "PURCHASE",
+  posted: true,
+  version: 2,
 };
 
 const sale: InvestmentSaleViewModel = {
@@ -81,9 +113,11 @@ function callbacks() {
     onCreateLot: vi.fn(() => Promise.resolve(undefined)),
     onUpdateLot: vi.fn(() => Promise.resolve(undefined)),
     onDeleteLot: vi.fn(() => Promise.resolve(undefined)),
+    onCreateCapitalIncrease: vi.fn(() => Promise.resolve(undefined)),
     onCreateSale: vi.fn(() => Promise.resolve(undefined)),
     onUpdateSale: vi.fn(() => Promise.resolve(undefined)),
     onDeleteSale: vi.fn(() => Promise.resolve(undefined)),
+    onCreateFxConversion: vi.fn(() => Promise.resolve(undefined)),
   };
 }
 
@@ -93,8 +127,13 @@ function pageModel(overrides: Partial<{
 }> = {}) {
   return {
     accounts,
+    brokerageAccounts,
+    fxAccounts: [
+      { id: "account-bank", name: "Piapiri TL", currencyCode: "TRY", isArchived: false },
+      { id: "account-usd", name: "Piapiri USD", currencyCode: "USD", isArchived: false },
+    ],
     instruments,
-    lots: overrides.lots ?? [lot],
+    lots: overrides.lots ?? [fundLot, lot],
     portfolio,
     sales: overrides.sales ?? [sale],
   };
@@ -112,7 +151,7 @@ describe("InvestmentsPage", () => {
     await user.type(within(dialog).getByLabelText("Adet"), "10,5000");
     await user.type(within(dialog).getByLabelText("Alış fiyatı"), "1.234,56");
     await user.selectOptions(
-      within(dialog).getByLabelText("İlişkili hesap (isteğe bağlı)"),
+      within(dialog).getByLabelText(/Hangi aracı kurum hesabından/),
       "account-bank",
     );
     const date = within(dialog).getByLabelText("Alış tarihi");
@@ -141,6 +180,139 @@ describe("InvestmentsPage", () => {
     expect(screen.getByText(/Son fiyat/)).toHaveTextContent("Son fiyat ₺152,75");
     expect(screen.getByText(/Son fiyat/)).toHaveTextContent("6 Ağustos 2026");
     expect(screen.getByText(/12\.5000 adet/)).toBeInTheDocument();
+  });
+
+  it("groups a position under its brokerage account with a cash, cost and total summary", () => {
+    render(<InvestmentsPage {...pageModel()} {...callbacks()} />);
+
+    const section = document.querySelector<HTMLElement>("[data-account-group='account-bank']")!;
+    expect(section).toHaveTextContent("Piapiri TL");
+    expect(section).toHaveTextContent(
+      "Nakit ₺5.000,00 · Yatırımda ₺1.909,38 · Maliyet ₺1.250,00",
+    );
+    // 5.000 nakit + 1.909,375 pozisyon değeri
+    expect(section).toHaveTextContent("₺6.909,38");
+    expect(
+      within(section).getByRole("heading", { name: "Teknoloji Fonu" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps each account section collapsed until it is opened", async () => {
+    const user = userEvent.setup();
+    render(<InvestmentsPage {...pageModel()} {...callbacks()} />);
+
+    const section = document.querySelector<HTMLDetailsElement>("[data-account-group='account-bank']")!;
+    expect(section.open).toBe(false);
+    // The summary figures stay readable while collapsed.
+    expect(section).toHaveTextContent("Nakit ₺5.000,00 · Yatırımda ₺1.909,38 · Maliyet ₺1.250,00");
+
+    await user.click(within(section).getByText("Piapiri TL"));
+    expect(section.open).toBe(true);
+  });
+
+  it("shows the portfolio value chart above the account sections", () => {
+    render(<InvestmentsPage {...pageModel()} {...callbacks()} />);
+
+    const chart = screen.getByRole("heading", { name: "Portföy Değeri Gelişimi" }).closest(".panel")!;
+    const firstSection = document.querySelector("[data-account-group]")!;
+    expect(chart.compareDocumentPosition(firstSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("shows a Bağlanmamış section for a position whose lots name no account", () => {
+    const orphan: InvestmentLotViewModel = {
+      ...fundLot,
+      id: "lot-fund-orphan",
+      accountId: null,
+      accountName: null,
+    };
+    render(<InvestmentsPage {...pageModel({ lots: [orphan] })} {...callbacks()} />);
+
+    const section = document.querySelector<HTMLElement>("[data-account-group='unlinked']")!;
+    expect(section).toHaveTextContent("Bağlanmamış pozisyonlar");
+    expect(section).toHaveTextContent("Bir aracı kurum hesabına bağlı değil");
+    expect(
+      within(section).getByRole("heading", { name: "Teknoloji Fonu" }),
+    ).toBeInTheDocument();
+    // The cash-only Piapiri section still renders on its own.
+    expect(
+      document.querySelector("[data-account-group='account-bank']"),
+    ).toHaveTextContent("Bu hesaptan alınmış açık pozisyon yok.");
+  });
+
+  it("shows total savings as brokerage cash plus open positions in the header", () => {
+    render(<InvestmentsPage {...pageModel()} {...callbacks()} />);
+
+    const intro = screen.getByText("Toplam birikim varlığı").closest(".section-intro")!;
+    expect(intro).toHaveTextContent("₺6.909,38");
+    expect(intro).toHaveTextContent("Nakit ₺5.000,00 · Pozisyon ₺1.909,38");
+  });
+
+  it("opens the döviz al dialog from the investments header", async () => {
+    const user = userEvent.setup();
+    render(<InvestmentsPage {...pageModel()} {...callbacks()} />);
+
+    await user.click(screen.getByRole("button", { name: "+ Döviz al" }));
+    const dialog = await screen.findByRole("dialog", { name: "Döviz al" });
+    expect(within(dialog).getByLabelText("Döviz hesabı")).toBeInTheDocument();
+  });
+
+  it("shows the brokerage account per lot and flags an unposted one", () => {
+    const actions = callbacks();
+    const linked: InvestmentLotViewModel = { ...lot, id: "lot-linked", accountName: "Piapiri TL", posted: true };
+    const unlinked: InvestmentLotViewModel = { ...lot, id: "lot-unlinked", accountName: "Piapiri TL", posted: false };
+    const noAccount: InvestmentLotViewModel = { ...lot, id: "lot-none", accountId: null, accountName: null, posted: false };
+    render(<InvestmentsPage {...pageModel({ lots: [linked, unlinked, noAccount] })} {...actions} />);
+
+    const linkedRow = document.querySelector("[data-lot-id='lot-linked']")!;
+    expect(linkedRow).toHaveTextContent("Piapiri TL");
+    expect(linkedRow).not.toHaveTextContent("nakit bağlı değil");
+    expect(document.querySelector("[data-lot-id='lot-unlinked']")).toHaveTextContent("nakit bağlı değil");
+    expect(document.querySelector("[data-lot-id='lot-none']")).toHaveTextContent("—");
+  });
+
+  it("records a bonus issue as a bedelsiz capital increase and warns on a linked instrument", async () => {
+    const user = userEvent.setup();
+    const actions = callbacks();
+    render(<InvestmentsPage {...pageModel()} {...actions} />);
+
+    await user.click(screen.getByRole("button", { name: "+ Sermaye artırımı" }));
+    const dialog = await screen.findByRole("dialog", { name: "Sermaye artırımı / bölünme" });
+    await user.selectOptions(within(dialog).getByLabelText(/Yatırım aracı/), "instrument-fund");
+    expect(within(dialog).getByText(/oran bölünmeleri otomatik/)).toBeInTheDocument();
+    await user.type(within(dialog).getByLabelText(/Yeni toplam adet/), "25");
+    const date = within(dialog).getByLabelText("Tarih");
+    await user.clear(date);
+    await user.type(date, "2026-08-10");
+    await user.click(within(dialog).getByRole("button", { name: "Kaydet" }));
+
+    await waitFor(() => {
+      expect(actions.onCreateCapitalIncrease).toHaveBeenCalledWith({
+        instrumentId: "instrument-fund",
+        newTotalQuantity: "25",
+        amountPaid: "0",
+        accountId: null,
+        effectiveAt: isoAtLocalNoon("2026-08-10"),
+        notes: null,
+      });
+    });
+  });
+
+  it("requires an account for a paid (bedelli) capital increase", async () => {
+    const user = userEvent.setup();
+    const actions = callbacks();
+    render(<InvestmentsPage {...pageModel()} {...actions} />);
+
+    await user.click(screen.getByRole("button", { name: "+ Sermaye artırımı" }));
+    const dialog = await screen.findByRole("dialog", { name: "Sermaye artırımı / bölünme" });
+    await user.selectOptions(within(dialog).getByLabelText(/Yatırım aracı/), "instrument-fund");
+    await user.type(within(dialog).getByLabelText(/Yeni toplam adet/), "25");
+    const paid = within(dialog).getByLabelText(/Bu artırım için ödenen tutar/);
+    await user.clear(paid);
+    await user.type(paid, "500");
+    await user.click(within(dialog).getByRole("button", { name: "Kaydet" }));
+
+    expect(within(dialog).getByText(/ödemenin çıktığı hesabı seçin/)).toBeInTheDocument();
+    expect(actions.onCreateCapitalIncrease).not.toHaveBeenCalled();
   });
 
   it("records the selected destination account when creating a sale", async () => {
@@ -243,7 +415,7 @@ describe("InvestmentsPage", () => {
     await user.click(editButton!);
     const dialog = await screen.findByRole("dialog", { name: "Alımı düzenle" });
     expect(within(dialog).getByLabelText("Yatırım aracı")).toHaveValue("instrument-old");
-    expect(within(dialog).getByLabelText("İlişkili hesap (isteğe bağlı)")).toHaveValue(
+    expect(within(dialog).getByLabelText(/Hangi aracı kurum hesabından/)).toHaveValue(
       "account-old",
     );
     await user.click(within(dialog).getByRole("button", { name: "Kaydet" }));

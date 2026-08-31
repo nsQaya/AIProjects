@@ -183,7 +183,7 @@ export function UpcomingPage({ accounts, items, onDelete, onEdit, onNew, onReali
       {feedback ? <InlineFeedback tone="error">{feedback}</InlineFeedback> : null}
       <article className="panel schedule-panel">
         <header className="panel-head">
-          <div><h2>Yaklaşan ödeme ve tahsilatlar</h2><p>Tek seferlik ve tekrar eden planlar; gerçekleşenler doğrudan işlemlere aktarılır</p></div>
+          <div><h2>Yaklaşan ödeme ve tahsilatlar</h2><p>Tek seferlik ve tekrar eden planlar; “Gerçekleşti” işlem kaydını dolu açar, kaydedince plan da tamamlanır</p></div>
           <Button id="open-scheduled-dialog" onClick={onNew}>+ Planlı işlem</Button>
         </header>
         <div className="status-filter" aria-label="Yaklaşan işlem durumu">
@@ -214,9 +214,7 @@ export function UpcomingPage({ accounts, items, onDelete, onEdit, onNew, onReali
                       className="success-link"
                       data-realize-scheduled={item.id}
                       disabled={pendingId === item.id}
-                      onClick={() => {
-                        if (globalThis.confirm(`“${item.title}” gerçekleşti olarak işlemlere aktarılsın mı?`)) void act(item, () => onRealize(item));
-                      }}
+                      onClick={() => void act(item, () => onRealize(item))}
                     >Gerçekleşti</button>
                     <button type="button" data-edit-scheduled={item.id} disabled={pendingId === item.id} onClick={() => onEdit(item)}>Düzenle</button>
                     <button

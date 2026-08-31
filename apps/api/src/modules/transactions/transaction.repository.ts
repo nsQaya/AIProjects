@@ -1,6 +1,6 @@
 import type { DbClient } from "../../infrastructure/database";
 import { AppError } from "../../common/errors";
-import { findSystemAccountId } from "../accounts/system-accounts";
+import { resolveSystemEquityAccountId } from "../accounts/system-accounts";
 import type { TransactionMutationInput } from "./transaction.schemas";
 import type { LedgerEntryDraft } from "../ledger/ledger.types";
 
@@ -19,7 +19,7 @@ export async function assertAccountPostingLimits(client:DbClient,entries:LedgerE
   for(const item of entries){
     const existing=grouped.get(item.accountId);
     if(existing)throw new AppError(422,"DUPLICATE_ACCOUNT_ENTRY","A transaction cannot post multiple entries to the same account");
-    grouped.set(item.accountId,{direction:item.direction,amount:item.baseAmount});
+    grouped.set(item.accountId,{direction:item.direction,amount:item.amount});
   }
   const ids=[...grouped.keys()];
   const accounts=await client.query<{
@@ -32,8 +32,8 @@ export async function assertAccountPostingLimits(client:DbClient,entries:LedgerE
     const result=await client.query<{new_balance:string;allowed:boolean}>(
       `WITH current_balance AS (
          SELECT CASE WHEN $2='DEBIT'
-           THEN COALESCE(SUM(CASE WHEN e.direction='DEBIT' THEN e.base_amount ELSE -e.base_amount END),0)
-           ELSE COALESCE(SUM(CASE WHEN e.direction='CREDIT' THEN e.base_amount ELSE -e.base_amount END),0)
+           THEN COALESCE(SUM(CASE WHEN e.direction='DEBIT' THEN e.amount ELSE -e.amount END),0)
+           ELSE COALESCE(SUM(CASE WHEN e.direction='CREDIT' THEN e.amount ELSE -e.amount END),0)
          END AS value
          FROM transaction_entries e JOIN transactions t ON t.id=e.transaction_id AND t.status IN ('POSTED','REVERSED')
          WHERE e.account_id=$1
@@ -67,6 +67,6 @@ export async function resolveLedgerAccounts(client:DbClient,input:TransactionMut
   let contactAccountId:string|undefined;
   if(input.contactId){const result=await client.query<{id:string}>(`SELECT a.id FROM contacts c JOIN accounts a ON a.contact_id=c.id WHERE c.id=$1 AND c.book_id=$2 AND c.deleted_at IS NULL AND a.deleted_at IS NULL AND a.is_archived=false`,[input.contactId,input.bookId]);if(!result.rows[0])throw new AppError(422,"CONTACT_ACCOUNT_INVALID","Contact account is unavailable");contactAccountId=result.rows[0].id;}
   let equityAccountId:string|undefined;
-  if(input.type==='OPENING_BALANCE'){equityAccountId=await findSystemAccountId(client,input.bookId,"SYSTEM_EQUITY");}
+  if(input.type==='OPENING_BALANCE'){equityAccountId=await resolveSystemEquityAccountId(client,input.bookId,input.currencyCode);}
   return{categoryAccountId,contactAccountId,equityAccountId};
 }

@@ -21,6 +21,22 @@ const messages: Record<string, string> = {
   INVESTMENT_QUANTITY_EXCEEDED: "Satış adedi eldeki birikim adedini aşıyor.",
   INVESTMENT_HISTORY_LOCKED:
     "Satış yapılmış bir yatırımın eski alım lotları değiştirilemez; düzeltme lotu ekleyin.",
+  ACCOUNT_NOT_INVESTMENT: "Bu hesap bir aracı kurum / yatırım hesabı değil.",
+  INVESTMENT_CURRENCY_MISMATCH:
+    "Yatırım aracı ile aracı kurum hesabı aynı para biriminde olmalı.",
+  INVESTMENT_SALE_CURRENCY_MISMATCH:
+    "Satış bedelinin geçtiği hesap, yatırım aracıyla aynı para biriminde olmalı.",
+  CURRENCY_RATE_MISSING:
+    "Bu para birimi için güncel kur henüz alınmadı; Ayarlar’dan kurları güncelleyin.",
+  CURRENCY_NOT_ENABLED:
+    "Bu para birimini önce Ayarlar’dan defter için etkinleştirin.",
+  FX_REQUIRES_BASE_LEG: "Döviz dönüşümünün bir tarafı TL hesabı olmalı.",
+  FX_SAME_CURRENCY: "İki hesap da aynı para biriminde; döviz dönüşümü gerekmez.",
+  FX_SAME_ACCOUNT: "Kaynak ve hedef hesap farklı olmalı.",
+  CAPITAL_INCREASE_NOT_POSITIVE: "Yeni toplam adet mevcut açık pozisyondan büyük olmalı.",
+  ACCOUNT_REQUIRED_FOR_PAID_INCREASE:
+    "Bedelli sermaye artışında ödemenin çıktığı aracı kurum hesabı seçilmeli.",
+  CAPITAL_INCREASE_IMMUTABLE: "Sermaye artırımı kaydı düzenlenemez; silip yeniden ekleyin.",
   VERSION_CONFLICT: "Kayıt başka bir yerde değişti; canlı veriler yenilenmeli.",
   NETWORK_ERROR: "Canlı API'ye ulaşılamadı.",
   API_NOT_CONFIGURED: "Canlı API adresi tanımlı değil.",

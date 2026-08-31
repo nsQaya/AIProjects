@@ -6,19 +6,24 @@ import { Button, InlineFeedback } from "../../components/ui";
 import type { CashFlowRange } from "../../finance";
 import { errorMessage } from "../../lib/error-message";
 import { dateText, money, moneyInCurrency, toNumber } from "../../lib/format";
+import { FxConversionDialog } from "../fx";
+import { summarizeAccountPortfolio, type AccountPortfolioGroup } from "./account-portfolio";
 import { isPositiveDecimal } from "./decimal";
 import { investmentValueHistoryOption } from "./investment-chart-options";
-import { LotDialog, SaleDialog } from "./InvestmentDialogs";
+import { CapitalIncreaseDialog, LotDialog, SaleDialog } from "./InvestmentDialogs";
 import type {
   InvestmentLotViewModel,
   InvestmentPageCallbacks,
+  InvestmentPortfolioViewModel,
   InvestmentsPageModel,
   InvestmentSaleViewModel,
 } from "./investment-types";
 
 type InvestmentDialogState =
   | { readonly type: "lot"; readonly item: InvestmentLotViewModel | null }
-  | { readonly type: "sale"; readonly item: InvestmentSaleViewModel | null };
+  | { readonly type: "sale"; readonly item: InvestmentSaleViewModel | null }
+  | { readonly type: "capital" }
+  | { readonly type: "fx"; readonly mode: "buy" | "sell" };
 
 const valueHistoryRangeLabels: Readonly<Record<CashFlowRange, string>> = {
   "1M": "1 ay",
@@ -44,11 +49,15 @@ export interface InvestmentsPageProps extends InvestmentPageCallbacks, Investmen
 
 export function InvestmentsPage({
   accounts,
+  brokerageAccounts,
   busy = false,
   confirmDeleteLot = () => globalThis.confirm("Bu birikim alımı silinsin mi?"),
   confirmDeleteSale = (_sale, message) => globalThis.confirm(message),
+  fxAccounts,
   instruments,
   lots,
+  onCreateCapitalIncrease,
+  onCreateFxConversion,
   onCreateLot,
   onCreateSale,
   onDeleteLot,
@@ -68,12 +77,12 @@ export function InvestmentsPage({
   // costBasisTRY/currentValueTRY are already normalized to TRY (equal to the
   // plain fields for TRY instruments); a foreign-currency instrument with no
   // TCMB rate yet contributes 0 here rather than mixing units into the total.
-  const cost = portfolio.reduce((sum, item) => sum + toNumber(item.costBasisTRY), 0);
-  const value = portfolio.reduce(
-    (sum, item) => sum + toNumber(item.currentValueTRY ?? item.costBasisTRY),
-    0,
-  );
+  const summary = summarizeAccountPortfolio(portfolio, lots, brokerageAccounts);
+  const cost = summary.positionsCost;
+  const value = summary.positionsValue;
   const gain = value - cost;
+  // Total savings = brokerage cash still parked at custodians + open position value.
+  const netWorth = value + summary.totalCash;
   const realized = sales.reduce((sum, item) => sum + toNumber(item.gain), 0);
   const canCreateSale = portfolio.some((item) => isPositiveDecimal(item.quantity));
 
@@ -117,10 +126,11 @@ export function InvestmentsPage({
     <section className="page-section">
       <div className="section-intro">
         <div>
-          <p className="eyebrow">Yatırım portföyü</p>
-          <h2>{money(value)}</h2>
+          <p className="eyebrow">Toplam birikim varlığı</p>
+          <h2>{money(netWorth)}</h2>
           <span>
-            Maliyet {money(cost)} · Gerçekleşmemiş{" "}
+            Nakit {money(summary.totalCash)} · Pozisyon {money(value)} · Maliyet {money(cost)} ·
+            Gerçekleşmemiş{" "}
             <b className={gain < 0 ? "expense" : "income"}>
               {gain >= 0 ? "+" : ""}{money(gain)}
             </b>{" "}
@@ -132,12 +142,36 @@ export function InvestmentsPage({
         </div>
         <div className="intro-actions">
           <Button
+            id="open-fx-buy-dialog"
+            variant="secondary"
+            disabled={busy}
+            onClick={() => setDialog({ type: "fx", mode: "buy" })}
+          >
+            + Döviz al
+          </Button>
+          <Button
+            id="open-fx-sell-dialog"
+            variant="secondary"
+            disabled={busy}
+            onClick={() => setDialog({ type: "fx", mode: "sell" })}
+          >
+            Döviz sat
+          </Button>
+          <Button
             id="open-sale-dialog"
             variant="secondary"
             disabled={busy || !canCreateSale}
             onClick={() => setDialog({ type: "sale", item: null })}
           >
             Birikim sat
+          </Button>
+          <Button
+            id="open-capital-increase-dialog"
+            variant="secondary"
+            disabled={busy || !canCreateSale}
+            onClick={() => setDialog({ type: "capital" })}
+          >
+            + Sermaye artırımı
           </Button>
           <Button
             id="open-lot-dialog"
@@ -151,55 +185,6 @@ export function InvestmentsPage({
       </div>
 
       {pageError ? <InlineFeedback tone="error">{pageError}</InlineFeedback> : null}
-
-      <div className="account-grid">
-        {portfolio.length === 0 ? (
-          <div className="empty-state">Henüz açık birikim pozisyonu yok.</div>
-        ) : (
-          portfolio.map((item) => {
-            const itemGain = toNumber(item.gain);
-            const quantity = toNumber(item.quantity);
-            const averageCost = quantity === 0 ? 0 : toNumber(item.costBasis) / quantity;
-            const style = {
-              "--account": itemGain < 0 ? "#ad5048" : "#287b60",
-            } as CSSProperties;
-
-            return (
-              <article key={item.instrumentId} className="account-card" style={style}>
-                <div className="account-top">
-                  <span className="account-symbol" aria-hidden="true">◇</span>
-                  <small>{item.assetTypeName}</small>
-                </div>
-                <div>
-                  <small>{item.symbol || item.currencyCode}</small>
-                  <h3>{item.name}</h3>
-                </div>
-                <strong>{moneyInCurrency(item.currentValue ?? item.costBasis, item.currencyCode)}</strong>
-                {item.currencyCode !== "TRY" ? (
-                  <small>
-                    {item.currentValueTRY !== null
-                      ? `≈ ${money(item.currentValueTRY)}`
-                      : "TL karşılığı için kur bekleniyor"}
-                  </small>
-                ) : null}
-                <small>{item.quantity} adet · Ort. maliyet {moneyInCurrency(averageCost, item.currencyCode)}</small>
-                <b className={itemGain < 0 ? "expense" : "income"}>
-                  {item.latestPrice !== null ? (
-                    <>
-                      Son fiyat {moneyInCurrency(item.latestPrice, item.currencyCode)}
-                      {item.latestPriceAt ? ` · ${dateText(item.latestPriceAt)}` : ""}
-                      {" · "}{itemGain >= 0 ? "+" : ""}{moneyInCurrency(item.gain ?? "0", item.currencyCode)}
-                      {item.gainPercent !== null ? ` (%${toNumber(item.gainPercent).toFixed(2)})` : ""}
-                    </>
-                  ) : (
-                    "Son fiyat bekleniyor"
-                  )}
-                </b>
-              </article>
-            );
-          })
-        )}
-      </div>
 
       <article className="panel report-main-panel">
         <header className="panel-head">
@@ -234,6 +219,25 @@ export function InvestmentsPage({
           />
         )}
       </article>
+
+      {brokerageAccounts.length === 0 && portfolio.length === 0 ? (
+        <article className="panel">
+          <header className="panel-head">
+            <div>
+              <h2>Aracı kurum hesapları</h2>
+              <p>Piapiri, Binance, BES gibi kurumlara aktardığın, henüz yatırıma dönüşmemiş nakit</p>
+            </div>
+          </header>
+          <div className="empty-state">
+            Henüz aracı kurum hesabın yok. Hesaplar sayfasından “Birikim” türünde bir hesap
+            açıp para aktardığında burada görünür.
+          </div>
+        </article>
+      ) : (
+        summary.groups.map((group) => (
+          <AccountSection key={group.accountId ?? "unlinked"} group={group} />
+        ))
+      )}
 
       <article className="panel transaction-panel">
         <header className="panel-head">
@@ -292,36 +296,51 @@ export function InvestmentsPage({
       <article className="panel transaction-panel">
         <header className="panel-head">
           <div>
-            <h2>Alım lotları</h2>
-            <p>Alış fiyatı ve adet detayları</p>
+            <h2>Alımlar ve sermaye artışları</h2>
+            <p>Alış fiyatı, adet ve bedelsiz / bedelli artışlar</p>
           </div>
         </header>
         <div className="transaction-table investment-table">
           <div className="table-head">
-            <span>Varlık</span><span>Alım tarihi</span><span>Adet</span>
-            <span>Alış fiyatı</span><span>Maliyet</span><span>İşlemler</span>
+            <span>Varlık</span><span>Tarih</span><span>Adet</span>
+            <span>Birim fiyat</span><span>Maliyet</span><span>Hesap</span><span>İşlemler</span>
           </div>
           {lots.length === 0 ? (
             <div className="empty-state">Henüz birikim alımı yok.</div>
           ) : (
             lots.map((item) => {
               const deleting = pendingAction === `lot:${item.id}`;
+              const capitalIncrease = item.kind === "CAPITAL_INCREASE";
+              const kindLabel = capitalIncrease
+                ? isPositiveDecimal(item.costBasis)
+                  ? "Bedelli"
+                  : "Bedelsiz"
+                : null;
               return (
                 <div className="table-row" key={item.id} data-lot-id={item.id}>
-                  <span><b>{item.instrumentName}</b></span>
+                  <span>
+                    <b>{item.instrumentName}</b>
+                    {kindLabel ? <small className="lot-kind"> · {kindLabel}</small> : null}
+                  </span>
                   <span>{dateText(item.purchasedAt)}</span>
                   <span>{item.quantity}</span>
                   <span>{moneyInCurrency(item.unitPrice, item.currencyCode)}</span>
                   <strong>{moneyInCurrency(item.costBasis, item.currencyCode)}</strong>
+                  <span className="lot-account">
+                    {item.accountName ?? "—"}
+                    {item.accountName && !item.posted ? <small>nakit bağlı değil</small> : null}
+                  </span>
                   <span className="row-actions">
-                    <button
-                      type="button"
-                      data-edit-lot={item.id}
-                      disabled={busy || pendingAction !== null}
-                      onClick={() => setDialog({ type: "lot", item })}
-                    >
-                      Düzenle
-                    </button>
+                    {capitalIncrease ? null : (
+                      <button
+                        type="button"
+                        data-edit-lot={item.id}
+                        disabled={busy || pendingAction !== null}
+                        onClick={() => setDialog({ type: "lot", item })}
+                      >
+                        Düzenle
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="danger-link"
@@ -362,7 +381,105 @@ export function InvestmentsPage({
           onUpdate={onUpdateSale}
         />
       ) : null}
+      {dialog?.type === "capital" ? (
+        <CapitalIncreaseDialog
+          accounts={accounts}
+          instruments={instruments}
+          portfolio={portfolio}
+          onClose={() => setDialog(null)}
+          onCreate={onCreateCapitalIncrease}
+        />
+      ) : null}
+      {dialog?.type === "fx" ? (
+        <FxConversionDialog
+          accounts={fxAccounts}
+          initialMode={dialog.mode}
+          onClose={() => setDialog(null)}
+          onSubmit={onCreateFxConversion}
+        />
+      ) : null}
     </section>
+  );
+}
+
+/**
+ * A brokerage account (or the "Bağlanmamış" bucket) with the positions funded
+ * through it. Collapsed by default: the summary line (cash, positions value,
+ * cost and total) stays visible; expanding reveals the position cards.
+ */
+function AccountSection({ group }: { group: AccountPortfolioGroup }) {
+  const figures = group.accountId
+    ? `Nakit ${moneyInCurrency(group.cash ?? "0", group.currencyCode ?? "TRY")} · Yatırımda ${money(
+        group.positionsValue,
+      )} · Maliyet ${money(group.positionsCost)}`
+    : `Bir aracı kurum hesabına bağlı değil · Yatırımda ${money(group.positionsValue)} · Maliyet ${money(
+        group.positionsCost,
+      )}`;
+
+  return (
+    <details className="panel account-section" data-account-group={group.accountId ?? "unlinked"}>
+      <summary>
+        <div className="account-section-headline">
+          <h2>{group.name}{group.isArchived ? " · Arşivli" : ""}</h2>
+          {group.total !== null ? (
+            <strong className="account-section-total">{money(group.total)}</strong>
+          ) : null}
+        </div>
+        <p className="account-section-figures">{figures}</p>
+      </summary>
+      {group.positions.length === 0 ? (
+        <div className="empty-state">Bu hesaptan alınmış açık pozisyon yok.</div>
+      ) : (
+        <div className="account-grid">
+          {group.positions.map((item) => (
+            <PortfolioPositionCard key={item.instrumentId} item={item} />
+          ))}
+        </div>
+      )}
+    </details>
+  );
+}
+
+function PortfolioPositionCard({ item }: { item: InvestmentPortfolioViewModel }) {
+  const itemGain = toNumber(item.gain);
+  const quantity = toNumber(item.quantity);
+  const averageCost = quantity === 0 ? 0 : toNumber(item.costBasis) / quantity;
+  const style = {
+    "--account": itemGain < 0 ? "#ad5048" : "#287b60",
+  } as CSSProperties;
+
+  return (
+    <article className="account-card" style={style}>
+      <div className="account-top">
+        <span className="account-symbol" aria-hidden="true">◇</span>
+        <small>{item.assetTypeName}</small>
+      </div>
+      <div>
+        <small>{item.symbol || item.currencyCode}</small>
+        <h3>{item.name}</h3>
+      </div>
+      <strong>{moneyInCurrency(item.currentValue ?? item.costBasis, item.currencyCode)}</strong>
+      {item.currencyCode !== "TRY" ? (
+        <small>
+          {item.currentValueTRY !== null
+            ? `≈ ${money(item.currentValueTRY)}`
+            : "TL karşılığı için kur bekleniyor"}
+        </small>
+      ) : null}
+      <small>{item.quantity} adet · Ort. maliyet {moneyInCurrency(averageCost, item.currencyCode)}</small>
+      <b className={itemGain < 0 ? "expense" : "income"}>
+        {item.latestPrice !== null ? (
+          <>
+            Son fiyat {moneyInCurrency(item.latestPrice, item.currencyCode)}
+            {item.latestPriceAt ? ` · ${dateText(item.latestPriceAt)}` : ""}
+            {" · "}{itemGain >= 0 ? "+" : ""}{moneyInCurrency(item.gain ?? "0", item.currencyCode)}
+            {item.gainPercent !== null ? ` (%${toNumber(item.gainPercent).toFixed(2)})` : ""}
+          </>
+        ) : (
+          "Son fiyat bekleniyor"
+        )}
+      </b>
+    </article>
   );
 }
 

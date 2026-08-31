@@ -127,7 +127,7 @@ export interface InvestmentPriceAtDateDTO {
   priceDate: string;
   price: MoneyString;
   available: boolean;
-  source: "YAHOO" | "MANUAL" | "MISSING";
+  source: "YAHOO" | "YAHOO_LIVE" | "MANUAL" | "MISSING";
 }
 
 export type InvestmentPricesAtDateResponse = ItemListResponse<InvestmentPriceAtDateDTO>;
@@ -161,6 +161,10 @@ export interface InvestmentLotDTO {
   costBasis: MoneyString;
   purchasedAt: ISODateTimeString;
   notes: string | null;
+  /** PURCHASE for an ordinary buy; CAPITAL_INCREASE for a bonus/rights issue or a manual split. */
+  kind: "PURCHASE" | "CAPITAL_INCREASE";
+  /** True when a ledger transaction moved cash out of the brokerage account for this lot. */
+  posted: boolean;
   version: Version;
 }
 
@@ -184,10 +188,24 @@ export interface UpdateInvestmentLotRequest {
   version: Version;
 }
 
+export interface CreateInvestmentCapitalIncreaseRequest {
+  bookId: UUID;
+  instrumentId: UUID;
+  /** The position's new total open quantity after the bonus/rights issue or split. */
+  newTotalQuantity: MoneyString;
+  /** Cash paid to subscribe; "0" for a bonus issue or a plain split. */
+  amountPaid: MoneyString;
+  /** Brokerage account the payment leaves; required when amountPaid > 0. */
+  accountId?: UUID | null;
+  effectiveAt: ISODateTimeString;
+  notes?: string | null;
+}
+
 export type InvestmentLotListResponse = ItemListResponse<InvestmentLotDTO>;
 export type CreateInvestmentLotResponse = InvestmentLotDTO;
 export type UpdateInvestmentLotResponse = InvestmentLotDTO;
 export type DeleteInvestmentLotResponse = DeletedEntityResponse;
+export type CreateInvestmentCapitalIncreaseResponse = InvestmentLotDTO;
 
 export interface ListInvestmentLotsQuery {
   bookId: UUID;
@@ -269,5 +287,23 @@ export type UpdateInvestmentSaleResponse = InvestmentSaleDTO;
 export type DeleteInvestmentSaleResponse = DeletedEntityResponse;
 
 export interface ListInvestmentSalesQuery {
+  bookId: UUID;
+}
+
+/** A brokerage/custodian account with its parked cash, shown per-account on the investments page. */
+export interface InvestmentBrokerageAccountDTO {
+  id: UUID;
+  name: string;
+  currencyCode: CurrencyCode;
+  /** Available cash in the account's own currency. */
+  displayBalance: MoneyString;
+  /** displayBalance converted to the book base currency (TRY) at the latest rate; equal to displayBalance when the account is already TRY. */
+  displayBalanceTry: MoneyString;
+  isArchived: boolean;
+}
+
+export type InvestmentBrokerageAccountListResponse = ItemListResponse<InvestmentBrokerageAccountDTO>;
+
+export interface ListInvestmentBrokerageAccountsQuery {
   bookId: UUID;
 }

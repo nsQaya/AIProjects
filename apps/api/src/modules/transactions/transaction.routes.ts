@@ -30,8 +30,8 @@ transactionRoutes.get("/",async (c) => {
     pool.query(
     `WITH ledger AS (
        SELECT t.id,
-         SUM(CASE WHEN e.direction='DEBIT' THEN e.base_amount ELSE -e.base_amount END) AS delta,
-         SUM(SUM(CASE WHEN e.direction='DEBIT' THEN e.base_amount ELSE -e.base_amount END))
+         SUM(CASE WHEN e.direction='DEBIT' THEN e.amount ELSE -e.amount END) AS delta,
+         SUM(SUM(CASE WHEN e.direction='DEBIT' THEN e.amount ELSE -e.amount END))
            OVER(ORDER BY t.transaction_date,t.transaction_no) AS running_balance
        FROM transactions t
        JOIN transaction_entries e ON e.transaction_id=t.id
@@ -68,7 +68,7 @@ transactionRoutes.get("/",async (c) => {
     [bookId,limit,cursor,accountIds,includeAllAccounts,categoryId,from,to,costCenterId],
     ),
     pool.query(
-      `SELECT COALESCE(SUM(CASE WHEN e.direction='DEBIT' THEN e.base_amount ELSE -e.base_amount END),0)::text AS balance
+      `SELECT COALESCE(SUM(CASE WHEN e.direction='DEBIT' THEN e.amount ELSE -e.amount END),0)::text AS balance
        FROM transaction_entries e
        JOIN accounts a ON a.id=e.account_id
        JOIN transactions t ON t.id=e.transaction_id

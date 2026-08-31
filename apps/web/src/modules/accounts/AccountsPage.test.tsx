@@ -12,6 +12,7 @@ const bankType: AccountTypeDTO = {
   normalBalance: "DEBIT",
   defaultAllowNegativeBalance: false,
   purpose: null,
+  isInvestment: false,
   isSystem: true,
   isActive: true,
   sortOrder: 20,
@@ -26,6 +27,7 @@ const creditCardType: AccountTypeDTO = {
   normalBalance: "CREDIT",
   defaultAllowNegativeBalance: true,
   purpose: null,
+  isInvestment: false,
   isSystem: true,
   isActive: true,
   sortOrder: 30,
@@ -40,7 +42,10 @@ const bankAccount: AccountViewModel = {
   accountTypeId: bankType.id,
   accountTypeName: bankType.name,
   accountTypeIcon: null,
+  currencyCode: "TRY",
   displayBalance: "1250.50",
+  displayBalanceTry: "1250.50",
+  openingBalance: "0",
   allowNegativeBalance: false,
   creditLimit: null,
   availableCredit: null,
@@ -57,7 +62,7 @@ function callbacks() {
 }
 
 describe("AccountsPage", () => {
-  it("shows opening balance only on create and keeps account type editable", async () => {
+  it("keeps opening balance and account type editable after creation", async () => {
     const user = userEvent.setup();
     const actions = callbacks();
     render(<AccountsPage accounts={[bankAccount]} accountTypes={accountTypes} {...actions} />);
@@ -68,7 +73,7 @@ describe("AccountsPage", () => {
 
     await user.click(screen.getByRole("button", { name: "Düzenle" }));
     const dialog = await screen.findByRole("dialog", { name: "Hesabı düzenle" });
-    expect(within(dialog).queryByLabelText("Açılış bakiyesi")).not.toBeInTheDocument();
+    expect(within(dialog).getByLabelText(/Açılış bakiyesi/)).toHaveValue("0");
 
     const type = within(dialog).getByLabelText("Hesap türü");
     expect(type).toBeEnabled();
@@ -80,6 +85,27 @@ describe("AccountsPage", () => {
     expect(actions.onUpdateAccount).toHaveBeenCalledWith(
       bankAccount.id,
       expect.objectContaining({ accountTypeId: creditCardType.id, version: bankAccount.version }),
+    );
+  });
+
+  it("submits a changed opening balance when editing an account", async () => {
+    const user = userEvent.setup();
+    const actions = callbacks();
+    const funded: AccountViewModel = { ...bankAccount, openingBalance: "1000.000000" };
+    render(<AccountsPage accounts={[funded]} accountTypes={accountTypes} {...actions} />);
+
+    await user.click(screen.getByRole("button", { name: "Düzenle" }));
+    const dialog = await screen.findByRole("dialog", { name: "Hesabı düzenle" });
+    const openingBalance = within(dialog).getByLabelText(/Açılış bakiyesi/);
+    expect(openingBalance).toHaveValue("1000");
+
+    await user.clear(openingBalance);
+    await user.type(openingBalance, "1500,50");
+    await user.click(within(dialog).getByRole("button", { name: "Kaydet" }));
+
+    expect(actions.onUpdateAccount).toHaveBeenCalledWith(
+      funded.id,
+      expect.objectContaining({ openingBalance: "1500.50", version: funded.version }),
     );
   });
 
@@ -107,6 +133,7 @@ describe("AccountsPage", () => {
       allowNegativeBalance: true,
       creditLimit: "15000.50",
       openingBalance: "0",
+      currencyCode: "TRY",
     });
   });
 
@@ -170,8 +197,61 @@ describe("AccountsPage", () => {
         accountTypeId: bankType.id,
         allowNegativeBalance: true,
         creditLimit: "500",
+        openingBalance: "0",
         version: bankAccount.version,
       });
+    });
+  });
+
+  it("shows a foreign-currency account balance in its own currency and in TRY", () => {
+    const actions = callbacks();
+    const usdAccount: AccountViewModel = {
+      ...bankAccount,
+      id: "account-usd",
+      name: "Piapiri USD",
+      currencyCode: "USD",
+      displayBalance: "50",
+      displayBalanceTry: "1744.68",
+    };
+    render(<AccountsPage accounts={[usdAccount]} accountTypes={accountTypes} {...actions} />);
+
+    const card = screen.getByText("Piapiri USD").closest(".account-card");
+    expect(card).not.toBeNull();
+    const balance = card!.querySelector(".account-balance strong");
+    expect(balance?.textContent).toContain("50,00");
+    expect(balance?.textContent).not.toContain("₺");
+    expect(within(card as HTMLElement).getByText("≈ ₺1.744,68")).toBeInTheDocument();
+  });
+
+  it("offers enabled currencies on create and submits the chosen one", async () => {
+    const user = userEvent.setup();
+    const actions = callbacks();
+    render(
+      <AccountsPage
+        accounts={[bankAccount]}
+        accountTypes={accountTypes}
+        currencies={[
+          { code: "TRY", nameTr: "Türk Lirası", nameEn: "Turkish Lira", isEnabled: true },
+          { code: "USD", nameTr: "ABD Doları", nameEn: "US Dollar", isEnabled: true },
+          { code: "EUR", nameTr: "Euro", nameEn: "Euro", isEnabled: false },
+        ]}
+        {...actions}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "+ Hesap ekle" }));
+    const dialog = await screen.findByRole("dialog", { name: "Hesap ekle" });
+    const currency = within(dialog).getByLabelText(/Para birimi/);
+    expect(within(currency).queryByRole("option", { name: /Euro/ })).not.toBeInTheDocument();
+
+    await user.type(within(dialog).getByLabelText("Hesap adı"), "Piapiri USD");
+    await user.selectOptions(currency, "USD");
+    await user.click(within(dialog).getByRole("button", { name: "Kaydet" }));
+
+    await waitFor(() => {
+      expect(actions.onCreateAccount).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "Piapiri USD", currencyCode: "USD" }),
+      );
     });
   });
 });
