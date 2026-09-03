@@ -214,6 +214,20 @@ suite("PostgreSQL cost-center integration",()=>{
   });
 
   it("executes the complete analytics suite against PostgreSQL",async()=>{
+    // The previous test reversed this account's only posted movement, and the
+    // per-account cash breakdown intentionally omits zero-balance accounts, so
+    // give it a real, current balance before asserting it shows up.
+    await createTransaction(pool,userId,{
+      bookId,
+      type:"EXPENSE",
+      title:"Analytics cash use",
+      amount:"500",
+      currencyCode:"TRY",
+      accountId:cashId,
+      categoryId:expenseCategoryId,
+      transactionDate:"2026-02-01T09:00:00.000Z",
+      clientOperationId:crypto.randomUUID(),
+    });
     await createScheduled(pool,userId,{
       bookId,
       accountId:cashId,
@@ -255,7 +269,8 @@ suite("PostgreSQL cost-center integration",()=>{
     expect(report.trend).toHaveLength(12);
     expect(report.accountBalances.accounts).toContainEqual(expect.objectContaining({id:cashId,name:"Cash"}));
     expect(Array.isArray(report.categoryDetail.transactions)).toBe(true);
-    expect(report.liquidity.events).toContainEqual(expect.objectContaining({title:"Planned analytics expense",impact:"-75.000000"}));
+    expect(report.liquidity.events).toContainEqual(expect.objectContaining({title:"Planned analytics expense",impact:"-75.000000",realized:false}));
+    expect(report.liquidity.events).toContainEqual(expect.objectContaining({title:"Analytics cash use",realized:true}));
     expect(report.netWorth.items).toContainEqual(expect.objectContaining({
       instrumentId:instrument.rows[0]!.id,
       currentValue:expect.any(String),

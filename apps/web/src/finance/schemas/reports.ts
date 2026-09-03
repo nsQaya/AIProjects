@@ -149,8 +149,9 @@ export const reportAnalyticsSchema = z.object({
       id: uuidSchema,
       title: z.string(),
       scheduledAt: isoDateTimeSchema,
-      type: scheduledTransactionTypeSchema,
+      type: clientTransactionTypeSchema,
       impact: decimalStringSchema,
+      realized: z.boolean(),
     })),
   }),
   investmentValueSeries: z.array(z.object({
@@ -158,6 +159,30 @@ export const reportAnalyticsSchema = z.object({
     periodStart: isoDateTimeSchema,
     value: decimalStringSchema,
   })),
+  instrumentComparison: z.object({
+    accounts: z.array(z.object({ accountId: uuidSchema, name: z.string() })),
+    instruments: z.array(z.object({
+      instrumentId: uuidSchema,
+      name: z.string(),
+      symbol: z.string().nullable(),
+      assetTypeName: z.string(),
+      currencyCode: currencyCodeSchema,
+      accountId: uuidSchema.nullable(),
+      accountName: z.string().nullable(),
+    })),
+    instrumentPoints: z.array(z.object({
+      instrumentId: uuidSchema,
+      period: z.string(),
+      periodStart: isoDateTimeSchema,
+      price: decimalStringSchema.nullable(),
+    })),
+    accountPoints: z.array(z.object({
+      accountId: uuidSchema,
+      period: z.string(),
+      periodStart: isoDateTimeSchema,
+      value: decimalStringSchema,
+    })),
+  }),
   netWorth: z.object({
     cashBalance: decimalStringSchema,
     investmentCost: decimalStringSchema,

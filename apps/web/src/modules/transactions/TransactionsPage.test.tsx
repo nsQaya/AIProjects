@@ -21,6 +21,7 @@ const EXPENSE_CATEGORY_ID = "00000000-0000-4000-8000-000000000005";
 const INCOME_ID = "00000000-0000-4000-8000-000000000006";
 const EXPENSE_ID = "00000000-0000-4000-8000-000000000007";
 const COST_CENTER_ID = "00000000-0000-4000-8000-000000000008";
+const TRANSFER_ID = "00000000-0000-4000-8000-000000000009";
 
 const accounts: readonly AccountView[] = [
   account(BANK_ID, "Banka", "Banka"),
@@ -133,12 +134,14 @@ function category(
 
 interface TransactionFixtureInput {
   id: string;
-  type: "INCOME" | "EXPENSE";
+  type: "INCOME" | "EXPENSE" | "TRANSFER";
   title: string;
   accountId: string;
   accountName: string;
-  categoryId: string;
-  categoryName: string;
+  categoryId?: string;
+  categoryName?: string;
+  targetAccountId?: string;
+  targetAccountName?: string;
   date: string;
   amount: string;
   balanceDelta: string;
@@ -151,20 +154,20 @@ interface TransactionFixtureInput {
 function transaction(input: TransactionFixtureInput): TransactionView {
   return {
     id: input.id,
-    transactionNo: input.type === "INCOME" ? "1" : "2",
+    transactionNo: { INCOME: "1", EXPENSE: "2", TRANSFER: "3" }[input.type],
     type: input.type,
     accountId: input.accountId,
     accountName: input.accountName,
-    targetAccountId: null,
-    targetAccountName: null,
+    targetAccountId: input.targetAccountId ?? null,
+    targetAccountName: input.targetAccountName ?? null,
     title: input.title,
     description: null,
     transactionDate: `${input.date}T12:00:00.000Z`,
     dueDate: null,
     status: "POSTED",
     currencyCode: "TRY",
-    categoryId: input.categoryId,
-    categoryName: input.categoryName,
+    categoryId: input.categoryId ?? null,
+    categoryName: input.categoryName ?? null,
     costCenterId: input.costCenterId ?? null,
     costCenterName: input.costCenterName ?? null,
     contactId: null,
@@ -173,7 +176,7 @@ function transaction(input: TransactionFixtureInput): TransactionView {
     balanceDelta: input.balanceDelta,
     runningBalance: input.runningBalance,
     ui: {
-      kind: input.type.toLowerCase() as "income" | "expense",
+      kind: input.type.toLowerCase() as "income" | "expense" | "transfer",
       description: input.title,
       date: input.date,
       amount: Number(input.amount),
@@ -303,6 +306,67 @@ describe("TransactionsPage ledger controls", () => {
       ["2026-08-06", "expense", "Haftalık market", "Nakit", "", "Aile arabası", "Market", "-80.00", "1120.25"],
     ]);
     expect(onNotify).toHaveBeenCalledWith("1 işlem dışa aktarıldı.");
+  });
+});
+
+describe("TransactionsPage transfer amount", () => {
+  const transferRow = (balanceDelta: string) =>
+    transaction({
+      id: TRANSFER_ID,
+      type: "TRANSFER",
+      title: "Bade basket için transfer",
+      accountId: BANK_ID,
+      accountName: "Banka",
+      targetAccountId: CASH_ID,
+      targetAccountName: "Nakit",
+      date: "2026-08-07",
+      amount: "2000.00",
+      balanceDelta,
+      runningBalance: "1120.25",
+      uiRunningBalance: -8000,
+    });
+
+  const renderWith = (rows: readonly TransactionView[]) => {
+    const onNotify = vi.fn<(message: string) => void>();
+    const result = render(
+      <TransactionsPage
+        accounts={accounts}
+        categories={categories}
+        costCenters={costCenters}
+        onDelete={vi.fn().mockResolvedValue(undefined)}
+        onEdit={vi.fn()}
+        onLedgerFilterChange={vi.fn().mockResolvedValue(undefined)}
+        onNotify={onNotify}
+        openingBalance="0"
+        transactions={rows}
+      />,
+    );
+    return { ...result, onNotify };
+  };
+
+  it("shows the moved amount when both legs net to zero in the current scope", () => {
+    const { container } = renderWith([transferRow("0.00")]);
+    const row = container.querySelector<HTMLElement>(`[data-transaction-id="${TRANSFER_ID}"]`)!;
+    expect(row).toHaveTextContent(money("2000.00"));
+    expect(row).not.toHaveTextContent(money(0));
+  });
+
+  it("keeps the signed delta when only one leg is in scope", () => {
+    const { container } = renderWith([transferRow("-2000.00")]);
+    const row = container.querySelector<HTMLElement>(`[data-transaction-id="${TRANSFER_ID}"]`)!;
+    expect(row).toHaveTextContent(`−${money("2000.00")}`);
+  });
+
+  it("exports the moved amount for a netted transfer", async () => {
+    const user = userEvent.setup();
+    renderWith([transferRow("0.00")]);
+
+    await user.click(screen.getByRole("button", { name: "Dışa aktar (.csv)" }));
+
+    const [, rows] = vi.mocked(downloadCsv).mock.calls[0]!;
+    expect(rows[1]).toEqual([
+      "2026-08-07", "transfer", "Bade basket için transfer", "Banka", "Nakit", "", "", "2000.00", "1120.25",
+    ]);
   });
 });
 

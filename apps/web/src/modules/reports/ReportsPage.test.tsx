@@ -16,6 +16,8 @@ const ACCOUNT_ID = "00000000-0000-4000-8000-000000000001";
 const TRANSACTION_ONE_ID = "00000000-0000-4000-8000-000000000004";
 const TRANSACTION_TWO_ID = "00000000-0000-4000-8000-000000000005";
 const INSTRUMENT_ID = "00000000-0000-4000-8000-000000000006";
+const INSTRUMENT_TWO_ID = "00000000-0000-4000-8000-000000000007";
+const ACCOUNT_TWO_ID = "00000000-0000-4000-8000-000000000008";
 
 function reportAccount(id: string, name: string): AccountView {
   return {
@@ -68,9 +70,34 @@ function analyticsFixture(): ReportAnalyticsResponse {
     liquidity: {
       openingBalance: "1600",
       items: [{ period: "2026-08", periodStart: "2026-08-01T00:00:00.000Z", inflow: "500", outflow: "200", net: "300", projectedBalance: "1900" }],
-      events: [{ id: TRANSACTION_TWO_ID, title: "Beklenen ödeme", scheduledAt: "2026-08-20T10:00:00.000Z", type: "EXPENSE", impact: "-200" }],
+      events: [
+        { id: TRANSACTION_TWO_ID, title: "Beklenen ödeme", scheduledAt: "2026-08-20T10:00:00.000Z", type: "EXPENSE", impact: "-200", realized: false },
+        { id: TRANSACTION_ONE_ID, title: "Taksitli alışveriş", scheduledAt: "2026-08-12T10:00:00.000Z", type: "EXPENSE", impact: "-450", realized: true },
+      ],
     },
     investmentValueSeries: [{ period: "2026-08", periodStart: "2026-08-01T00:00:00.000Z", value: "1200" }],
+    instrumentComparison: {
+      accounts: [
+        { accountId: ACCOUNT_ID, name: "Piapiri" },
+        { accountId: ACCOUNT_TWO_ID, name: "Binance" },
+      ],
+      instruments: [
+        { instrumentId: INSTRUMENT_ID, name: "Fon", symbol: "FON", assetTypeName: "Yatırım Fonu", currencyCode: "TRY", accountId: ACCOUNT_ID, accountName: "Piapiri" },
+        { instrumentId: INSTRUMENT_TWO_ID, name: "Bitcoin", symbol: "BTC", assetTypeName: "Kripto Varlık", currencyCode: "USD", accountId: ACCOUNT_TWO_ID, accountName: "Binance" },
+      ],
+      instrumentPoints: [
+        { instrumentId: INSTRUMENT_ID, period: "2026-07", periodStart: "2026-07-01T00:00:00.000Z", price: "10" },
+        { instrumentId: INSTRUMENT_ID, period: "2026-08", periodStart: "2026-08-01T00:00:00.000Z", price: "12" },
+        { instrumentId: INSTRUMENT_TWO_ID, period: "2026-07", periodStart: "2026-07-01T00:00:00.000Z", price: "100" },
+        { instrumentId: INSTRUMENT_TWO_ID, period: "2026-08", periodStart: "2026-08-01T00:00:00.000Z", price: "90" },
+      ],
+      accountPoints: [
+        { accountId: ACCOUNT_ID, period: "2026-07", periodStart: "2026-07-01T00:00:00.000Z", value: "1000" },
+        { accountId: ACCOUNT_ID, period: "2026-08", periodStart: "2026-08-01T00:00:00.000Z", value: "1200" },
+        { accountId: ACCOUNT_TWO_ID, period: "2026-07", periodStart: "2026-07-01T00:00:00.000Z", value: "5000" },
+        { accountId: ACCOUNT_TWO_ID, period: "2026-08", periodStart: "2026-08-01T00:00:00.000Z", value: "4500" },
+      ],
+    },
     netWorth: {
       cashBalance: "1600", investmentCost: "1000", investmentValue: "1200", realizedGain: "50", unrealizedGain: "200", totalAssets: "2800",
       cashAccounts: [
@@ -228,8 +255,39 @@ describe("ReportsPage", () => {
     expect(screen.getByText("Haftalık alışveriş")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Likidite tahmini" }));
     expect(screen.getByText("Beklenen ödeme")).toBeInTheDocument();
+    const installmentRow = screen.getByText("Taksitli alışveriş").closest("tr")!;
+    expect(within(installmentRow).getByText("Gerçekleşen")).toBeInTheDocument();
+    expect(within(screen.getByText("Beklenen ödeme").closest("tr")!).getByText("Planlı")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Varlık ve yatırım" }));
-    expect(screen.getByText("Fon")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Yatırım Performansı" })).toBeInTheDocument();
+    expect(screen.getAllByText("Fon").length).toBeGreaterThan(0);
+  });
+
+  it("compares account totals and drills into an account's instruments", async () => {
+    const user = userEvent.setup();
+    render(<ReportsPage analytics={analyticsFixture()} />);
+
+    await user.click(screen.getByRole("button", { name: "Varlık ve yatırım" }));
+    const panel = screen
+      .getByRole("heading", { name: "Varlık Değişim Karşılaştırması" })
+      .closest<HTMLElement>(".panel")!;
+    const table = within(panel).getByRole("table");
+
+    // Both accounts' totals start selected and the summary shows their rebased change.
+    const piapiriRow = within(table).getByText("Piapiri").closest("tr")!;
+    expect(within(piapiriRow).getByText("Hesap yekünü")).toBeInTheDocument();
+    expect(within(piapiriRow).getByText("%20.00")).toBeInTheDocument();
+    const binanceRow = within(table).getByText("Binance").closest("tr")!;
+    expect(within(binanceRow).getByText("%-10.00")).toBeInTheDocument();
+
+    // Adding an instrument line puts a third row in the summary.
+    await user.click(within(panel).getByRole("checkbox", { name: /FON/ }));
+    const fonRow = within(table).getByText("FON").closest("tr")!;
+    expect(within(fonRow).getByText("Yatırım Fonu")).toBeInTheDocument();
+
+    // Dropping an account total removes its summary row (its picker entry stays).
+    await user.click(within(panel).getByRole("checkbox", { name: /Binance/ }));
+    expect(within(table).queryByText("Binance")).not.toBeInTheDocument();
   });
 
   it("offers Excel and PDF export on the investment performance table", async () => {

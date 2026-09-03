@@ -130,6 +130,70 @@ suite("PostgreSQL liquidity forecast integration",()=>{
     const endAfter = windowAfter.liquidity.items.at(-1)?.projectedBalance;
     expect(endBefore).toBe(endAfter);
     expect(Number(endBefore)).toBe(-1500);
+
+    // The events table backs every chart bar: posted transactions dated in the
+    // window are listed as realized alongside the still-pending plans, and a
+    // transaction dated before the window is not.
+    const events = windowAfter.liquidity.events;
+    const groceries = events.find((event) => event.title === "Groceries");
+    expect(groceries?.realized).toBe(true);
+    expect(Number(groceries?.impact)).toBe(-200);
+    expect(events).toContainEqual(expect.objectContaining({ title: "Planned rent", realized: false }));
+    expect(events.some((event) => event.title === "Carryover")).toBe(false);
+  });
+
+  it("rebuilds a foreign-currency opening balance from native amount x latest rate, not stale base_amount",async()=>{
+    // A USD account funded when USD was 34 TRY and now sitting on that cash. Each
+    // leg recorded its own base_amount TRY snapshot at the rate of its own day,
+    // so SUM(base_amount) (34 000) no longer equals the real TRY value. The
+    // forecast must value it as native USD * the latest TCMB rate (42) instead.
+    const usd = await pool.query<{id:string}>(
+      `INSERT INTO accounts(book_id,name,account_type_id,normal_balance,currency_code,is_system,allow_negative_balance)
+       VALUES($1,'Piapiri USD',(SELECT id FROM account_types WHERE book_id=$1 AND name='Birikim'),'DEBIT','USD',false,true) RETURNING id`,
+      [bookId],
+    );
+    const usdId = usd.rows[0]!.id;
+    const equity = await pool.query<{id:string}>(
+      `INSERT INTO accounts(book_id,name,account_type_id,normal_balance,currency_code,is_system,allow_negative_balance)
+       VALUES($1,'USD Opening Equity',(SELECT id FROM account_types WHERE book_id=$1 AND purpose='SYSTEM_EQUITY'),'CREDIT','TRY',true,true) RETURNING id`,
+      [bookId],
+    );
+    await pool.query(`INSERT INTO book_currencies(book_id,currency_code) VALUES($1,'USD') ON CONFLICT DO NOTHING`,[bookId]);
+    await pool.query(
+      `INSERT INTO currency_daily_rates(currency_code,rate_date,try_rate)
+       VALUES('USD','2026-02-01',34),('USD',CURRENT_DATE,42) ON CONFLICT DO NOTHING`,
+    );
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const funding = await client.query<{id:string}>(
+        `INSERT INTO transactions(book_id,transaction_type,account_id,title,transaction_date,status,currency_code,client_operation_id,created_by)
+         VALUES($1,'ADJUSTMENT',$2,'USD yatirildi','2026-02-05T09:00:00.000Z','POSTED','USD',gen_random_uuid(),$3) RETURNING id`,
+        [bookId,usdId,userId],
+      );
+      await client.query(
+        `INSERT INTO transaction_entries(transaction_id,account_id,direction,amount,currency_code,base_amount)
+         VALUES($1,$2,'DEBIT',1000,'USD',34000),($1,$3,'CREDIT',34000,'TRY',34000)`,
+        [funding.rows[0]!.id,usdId,equity.rows[0]!.id],
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    const report = await loadReportAnalytics(pool,{
+      bookId,from:"2026-06-01T00:00:00.000Z",to:"2026-12-31T23:59:59.999Z",
+      accountIds:[usdId],includeAllAccounts:false,granularity:"month",
+    });
+
+    // 1000 USD * latest 42 = 42 000 — not the stale 34 000 base_amount snapshot.
+    expect(Number(report.liquidity.openingBalance)).toBeCloseTo(42000,2);
+    expect(Number(report.liquidity.items.at(-1)?.projectedBalance)).toBeCloseTo(42000,2);
+    // The Gelir-Gider-Net balance line rebuilds the same way.
+    expect(Number(report.trend.at(-1)?.balance)).toBeCloseTo(42000,2);
   });
 
   it("does not let a reversed transaction's later-dated reversal show up as phantom movement in either bucket",async()=>{
@@ -190,5 +254,56 @@ suite("PostgreSQL liquidity forecast integration",()=>{
     // The category only ever had the now-excluded reversed entry in this month, so
     // it must not appear at all (not appear with a phantom non-zero amount).
     expect(monthly.items.some((item) => item.name==="Market")).toBe(false);
+  });
+
+  it("builds the instrument comparison series and the per-account total-value series",async()=>{
+    // Exercises the three instrumentComparison queries against real Postgres - the
+    // dominant-account pick, the per-bucket unit price and the per-account holding
+    // value all share the same params array as every other analytics query (see
+    // report.analytics param gotcha).
+    await pool.query(`SELECT seed_default_investment_types($1)`,[bookId]);
+    const brokerage = await pool.query<{id:string}>(
+      `INSERT INTO accounts(book_id,name,account_type_id,normal_balance,currency_code,is_system)
+       VALUES($1,'Piapiri',(SELECT id FROM account_types WHERE book_id=$1 AND name='Birikim'),'DEBIT','TRY',false) RETURNING id`,
+      [bookId],
+    );
+    const brokerageId = brokerage.rows[0]!.id;
+    const instrument = await pool.query<{id:string}>(
+      `INSERT INTO investment_instruments(book_id,asset_type_id,name,symbol,currency_code)
+       VALUES($1,(SELECT id FROM investment_asset_types WHERE book_id=$1 AND name='Yatırım Fonu'),'Karşılaştırma Fonu','KRF','TRY') RETURNING id`,
+      [bookId],
+    );
+    const instrumentId = instrument.rows[0]!.id;
+    await pool.query(
+      `INSERT INTO investment_lots(book_id,instrument_id,account_id,quantity,unit_price,purchased_at)
+       VALUES($1,$2,$3,10,5,'2026-05-01T09:00:00.000Z')`,
+      [bookId,instrumentId,brokerageId],
+    );
+    await pool.query(
+      `INSERT INTO investment_prices(instrument_id,price,priced_at) VALUES
+       ($1,5,'2026-05-15T00:00:00.000Z'),($1,8,'2026-08-15T00:00:00.000Z')`,
+      [instrumentId],
+    );
+
+    const report = await loadReportAnalytics(pool,{
+      bookId,from:"2026-05-01T00:00:00.000Z",to:"2026-09-30T23:59:59.999Z",
+      accountIds:[brokerageId],includeAllAccounts:false,granularity:"month",
+    });
+
+    const meta = report.instrumentComparison.instruments.find((row) => row.instrumentId===instrumentId);
+    expect(meta?.symbol).toBe("KRF");
+    expect(meta?.accountId).toBe(brokerageId);
+    expect(meta?.accountName).toBe("Piapiri");
+    expect(report.instrumentComparison.accounts).toEqual([{ accountId: brokerageId, name: "Piapiri" }]);
+
+    const priceSeries = report.instrumentComparison.instrumentPoints.filter((point) => point.instrumentId===instrumentId);
+    expect(priceSeries.length).toBeGreaterThan(0);
+    // Latest price at or before the last bucket start (2026-09-01) is 8.
+    expect(Number(priceSeries.at(-1)?.price)).toBeCloseTo(8,2);
+
+    const valueSeries = report.instrumentComparison.accountPoints.filter((point) => point.accountId===brokerageId);
+    expect(valueSeries.length).toBeGreaterThan(0);
+    // 10 units * latest price 8 = 80 by the last bucket.
+    expect(Number(valueSeries.at(-1)?.value)).toBeCloseTo(80,2);
   });
 });

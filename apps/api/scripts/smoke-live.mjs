@@ -93,8 +93,10 @@ const analytics = (await request(`/api/v1/reports/analytics?bookId=${book.id}&fr
 if (!Array.isArray(analytics.trend) || !Array.isArray(analytics.accountBalances?.items)
   || !Array.isArray(analytics.categoryDetail?.transactions) || !Array.isArray(analytics.liquidity?.items)
   || !Array.isArray(analytics.netWorth?.items) || !Array.isArray(analytics.netWorth?.cashAccounts)
+  || !Array.isArray(analytics.instrumentComparison?.instruments) || !Array.isArray(analytics.instrumentComparison?.instrumentPoints)
+  || !Array.isArray(analytics.instrumentComparison?.accounts) || !Array.isArray(analytics.instrumentComparison?.accountPoints)
   || analytics.granularity !== "day") {
-  throw new Error("Five-report analytics response is incomplete");
+  throw new Error("Analytics report suite response is incomplete");
 }
 if (analytics.netWorth.cashAccounts.some(
   (row) => typeof row.accountId !== "string" || typeof row.accountTypeName !== "string" || typeof row.balanceTry !== "string",
@@ -170,14 +172,19 @@ const overriddenTx=(await request(`/api/v1/transactions?bookId=${book.id}`,{head
 if(!overriddenTx||Number(overriddenTx.amount)!==73.25||overriddenTx.title!=="Edited smoke payment")throw new Error(`Overridden realize did not persist: ${JSON.stringify(overriddenTx)}`);
 await request(`/api/v1/transactions/${overridden.transaction.id}/reverse?bookId=${book.id}`,{method:"POST",headers:{...authorization,"Idempotency-Key":randomUUID()},body:JSON.stringify({clientOperationId:randomUUID(),reason:"Override realize smoke cleanup"})});
 
+// Grouping shape is checked on a fixed 31-day August window; the period-end
+// balance is checked on a window that also reaches the account's opening
+// balance, which createAccount stamps with the current date.
+const balanceTo=encodeURIComponent(new Date(Date.now()+86_400_000).toISOString());
 const cashflowDaily=(await request(`/api/v1/reports/cash-flow?bookId=${book.id}&from=2026-08-01T00:00:00.000Z&to=2026-08-31T23:59:59.999Z&granularity=day`,{headers:authorization})).payload;
 if(cashflowDaily.granularity!=="day"||cashflowDaily.items.length!==31||!cashflowDaily.items.every(item=>item.period&&item.periodStart))throw new Error("Detailed daily cash-flow grouping failed");
-if(Number(cashflowDaily.items.at(-1)?.balance)!==874.5)throw new Error(`Period-end balance was not calculated from live entries: ${JSON.stringify(cashflowDaily.items.at(-1))}`);
-const filteredCashflow=(await request(`/api/v1/reports/cash-flow?bookId=${book.id}&from=2026-08-01T00:00:00.000Z&to=2026-08-31T23:59:59.999Z&granularity=day&accountIds=${account.id}`,{headers:authorization})).payload;
+const cashflowBalance=(await request(`/api/v1/reports/cash-flow?bookId=${book.id}&from=2026-08-01T00:00:00.000Z&to=${balanceTo}&granularity=day`,{headers:authorization})).payload;
+if(Number(cashflowBalance.items.at(-1)?.balance)!==874.5)throw new Error(`Period-end balance was not calculated from live entries: ${JSON.stringify(cashflowBalance.items.at(-1))}`);
+const filteredCashflow=(await request(`/api/v1/reports/cash-flow?bookId=${book.id}&from=2026-08-01T00:00:00.000Z&to=${balanceTo}&granularity=day&accountIds=${account.id}`,{headers:authorization})).payload;
 if(Number(filteredCashflow.items.at(-1)?.balance)!==874.5)throw new Error("Selected-account balance filter failed");
-const emptyBalanceCashflow=(await request(`/api/v1/reports/cash-flow?bookId=${book.id}&from=2026-08-01T00:00:00.000Z&to=2026-08-31T23:59:59.999Z&granularity=day&accountIds=none`,{headers:authorization})).payload;
+const emptyBalanceCashflow=(await request(`/api/v1/reports/cash-flow?bookId=${book.id}&from=2026-08-01T00:00:00.000Z&to=${balanceTo}&granularity=day&accountIds=none`,{headers:authorization})).payload;
 if(emptyBalanceCashflow.items.some(item=>Number(item.balance)!==0))throw new Error("Empty account selection did not return a zero balance series");
-const accountLedger=(await request(`/api/v1/transactions?bookId=${book.id}&accountIds=${account.id}&from=2026-08-01T00:00:00.000Z&to=2026-08-31T23:59:59.999Z&limit=1000`,{headers:authorization})).payload;
+const accountLedger=(await request(`/api/v1/transactions?bookId=${book.id}&accountIds=${account.id}&from=2026-08-01T00:00:00.000Z&to=${balanceTo}&limit=1000`,{headers:authorization})).payload;
 const expenseLedgerRow=accountLedger.items.find(item=>item.id===transaction.id);
 if(Number(expenseLedgerRow?.balanceDelta)!==-125.5||Number(accountLedger.items[0]?.runningBalance)!==874.5)throw new Error(`Account running balance failed: ${JSON.stringify(accountLedger.items)}`);
 const carryFrom=new Date(Date.now()+86_400_000).toISOString();

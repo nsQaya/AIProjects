@@ -21,6 +21,9 @@ describe("report analytics", () => {
       [{ period: "2026-08", periodStart: "2026-08-01T00:00:00.000Z", value: "120" }],
       [{ cashBalance: "160" }],
       [{ accountId: ACCOUNT_ID, name: "Banka", accountTypeName: "Banka", currencyCode: "TRY", balance: "160", balanceTry: "160" }],
+      [{ instrumentId: INSTRUMENT_ID, name: "Fon", symbol: "FON", assetTypeName: "Fon", currencyCode: "TRY", accountId: ACCOUNT_ID, accountName: "Banka" }],
+      [{ period: "2026-08", periodStart: "2026-08-01T00:00:00.000Z", instrumentId: INSTRUMENT_ID, price: "12.5" }],
+      [{ period: "2026-08", periodStart: "2026-08-01T00:00:00.000Z", accountId: ACCOUNT_ID, value: "120" }],
     ];
     let call = 0;
     const pool = {
@@ -48,6 +51,11 @@ describe("report analytics", () => {
     expect(report.netWorth.cashAccounts).toEqual([
       { accountId: ACCOUNT_ID, name: "Banka", accountTypeName: "Banka", currencyCode: "TRY", balance: "160", balanceTry: "160" },
     ]);
+    expect(report.instrumentComparison.instruments[0]?.instrumentId).toBe(INSTRUMENT_ID);
+    expect(report.instrumentComparison.instruments[0]?.accountId).toBe(ACCOUNT_ID);
+    expect(report.instrumentComparison.instrumentPoints[0]?.price).toBe("12.5");
+    expect(report.instrumentComparison.accountPoints[0]?.value).toBe("120");
+    expect(report.instrumentComparison.accounts).toEqual([{ accountId: ACCOUNT_ID, name: "Banka" }]);
     expect(calls[1]).toEqual([
       BOOK_ID,
       "2026-08-01T00:00:00.000Z",
@@ -65,6 +73,6 @@ describe("report analytics", () => {
       [ACCOUNT_ID],
       false,
     ]);
-    expect(calls.map((values) => values.length)).toEqual([1, 8, 8, 5, 5, 8, 5, 5, 8, 5, 5]);
+    expect(calls.map((values) => values.length)).toEqual([1, 8, 8, 5, 5, 8, 5, 5, 8, 5, 5, 5, 8, 8]);
   });
 });

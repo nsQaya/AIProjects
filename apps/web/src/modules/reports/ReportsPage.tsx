@@ -12,6 +12,7 @@ import type { ReportRange } from "../../finance/finance-state";
 import { today } from "../../lib/date";
 import { money, moneyInCurrency, toNumber } from "../../lib/format";
 import { exportTableToExcel, exportTableToPdf, type ExportTable } from "../../lib/table-export";
+import { InstrumentComparisonPanel } from "./InstrumentComparisonPanel";
 import { ReportFilters } from "./ReportFilters";
 import {
   accountBalanceOption,
@@ -52,6 +53,18 @@ export interface ReportsPageProps {
 }
 
 type ReportKey = "trend" | "balances" | "categories" | "liquidity" | "netWorth";
+
+const liquidityTypeLabels: Record<string, string> = {
+  INCOME: "Gelir",
+  EXPENSE: "Gider",
+  TRANSFER: "Transfer",
+  ADJUSTMENT: "Düzeltme",
+  OPENING_BALANCE: "Açılış",
+  SALE: "Satış",
+  PURCHASE: "Alış",
+  COLLECTION: "Tahsilat",
+  PAYMENT: "Ödeme",
+};
 
 const tabs: ReadonlyArray<{ key: ReportKey; label: string }> = [
   { key: "trend", label: "Gelir · Gider · Net" },
@@ -290,9 +303,9 @@ export function ReportsPage({
               ) : null}
             </header>
             <ReportChart busy={busy} height={390} label="Likidite ve nakit tahmini" option={liquidityOption(analytics.liquidity.items)} />
-            <div className="report-table-wrap"><table className="report-table"><thead><tr><th>Tarih</th><th>Planlı işlem</th><th>Tür</th><th>Etki</th></tr></thead><tbody>
-              {analytics.liquidity.events.map((event) => <tr key={event.id}><td>{reportDate(event.scheduledAt)}</td><td>{event.title}</td><td>{event.type}</td><td className={Number(event.impact) >= 0 ? "positive" : "negative"}>{money(Number(event.impact))}</td></tr>)}
-              {analytics.liquidity.events.length === 0 ? <tr><td colSpan={4}>Seçilen tarihlerde bekleyen planlı işlem yok.</td></tr> : null}
+            <div className="report-table-wrap"><table className="report-table"><thead><tr><th>Tarih</th><th>İşlem</th><th>Tür</th><th>Durum</th><th>Etki</th></tr></thead><tbody>
+              {analytics.liquidity.events.map((event) => <tr key={event.id}><td>{reportDate(event.scheduledAt)}</td><td>{event.title}</td><td>{liquidityTypeLabels[event.type] ?? event.type}</td><td>{event.realized ? "Gerçekleşen" : "Planlı"}</td><td className={Number(event.impact) >= 0 ? "positive" : "negative"}>{money(Number(event.impact))}</td></tr>)}
+              {analytics.liquidity.events.length === 0 ? <tr><td colSpan={5}>Seçilen tarihlerde işlem yok.</td></tr> : null}
             </tbody></table></div>
           </article>
         </>
@@ -323,6 +336,12 @@ export function ReportsPage({
               </p>
             ) : null}
           </article>
+          <InstrumentComparisonPanel
+            comparison={analytics.instrumentComparison}
+            busy={busy}
+            exportMeta={exportMeta}
+            exportActions={exportActions}
+          />
           <article className="panel report-main-panel">
             <header className="panel-head">
               <div><h2>Yatırım Performansı</h2><p>Bitiş tarihindeki pozisyon ve seçili dönemde gerçekleşen getiri</p></div>

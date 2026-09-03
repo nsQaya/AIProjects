@@ -156,9 +156,12 @@ export interface LiquidityForecastItemDTO {
 export interface LiquidityForecastEventDTO {
   id: UUID;
   title: string;
+  /** For a planned item the scheduled date; for a realized one the posting date. */
   scheduledAt: ISODateTimeString;
-  type: ScheduledTransactionType;
+  type: ClientTransactionType;
   impact: MoneyString;
+  /** true = an already-posted transaction dated inside the window (feeds the chart's realized part); false = a still-pending planned transaction. */
+  realized: boolean;
 }
 
 export interface InvestmentPerformanceItemDTO {
@@ -184,6 +187,39 @@ export interface InvestmentPerformanceItemDTO {
 export interface InvestmentValueSeriesItemDTO {
   period: string;
   periodStart: ISODateTimeString;
+  value: MoneyString;
+}
+
+/** A brokerage account that is the home of at least one compared instrument; the comparison can plot its total holding value. */
+export interface InstrumentComparisonAccountDTO {
+  accountId: UUID;
+  name: string;
+}
+
+export interface InstrumentComparisonInstrumentDTO {
+  instrumentId: UUID;
+  name: string;
+  symbol: string | null;
+  assetTypeName: string;
+  currencyCode: CurrencyCode;
+  /** The account that funded most of the position; null for lots with no account ("Bağlanmamış"). */
+  accountId: UUID | null;
+  accountName: string | null;
+}
+
+export interface InstrumentComparisonInstrumentPointDTO {
+  instrumentId: UUID;
+  period: string;
+  periodStart: ISODateTimeString;
+  /** Unit price in the instrument's own currency at or before the bucket; null when no price is known yet. */
+  price: MoneyString | null;
+}
+
+export interface InstrumentComparisonAccountPointDTO {
+  accountId: UUID;
+  period: string;
+  periodStart: ISODateTimeString;
+  /** Total holding value of the account's positions at the bucket, in the book base currency. */
   value: MoneyString;
 }
 
@@ -219,6 +255,13 @@ export interface ReportAnalyticsResponse {
     events: LiquidityForecastEventDTO[];
   };
   investmentValueSeries: InvestmentValueSeriesItemDTO[];
+  /** Overlay-comparison data for the "Varlık Değişim Karşılaştırması" report: per-instrument unit price and per-account total holding value over time. */
+  instrumentComparison: {
+    accounts: InstrumentComparisonAccountDTO[];
+    instruments: InstrumentComparisonInstrumentDTO[];
+    instrumentPoints: InstrumentComparisonInstrumentPointDTO[];
+    accountPoints: InstrumentComparisonAccountPointDTO[];
+  };
   netWorth: {
     cashBalance: MoneyString;
     investmentCost: MoneyString;

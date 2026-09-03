@@ -193,6 +193,124 @@ export function liquidityOption(
   };
 }
 
+type Comparison = ReportAnalyticsResponse["instrumentComparison"];
+
+export interface ComparisonSelection {
+  accountIds: readonly string[];
+  instrumentIds: readonly string[];
+}
+
+type SeriesPoint = { periodStart: string; value: number | null };
+
+/** One account's total-holding-value series, oldest bucket first. */
+export function accountValueSeries(comparison: Comparison, accountId: string): SeriesPoint[] {
+  return comparison.accountPoints
+    .filter((point) => point.accountId === accountId)
+    .map((point) => ({ periodStart: point.periodStart, value: Number(point.value) }))
+    .sort((left, right) => (left.periodStart < right.periodStart ? -1 : 1));
+}
+
+/** One instrument's unit-price series (native currency), oldest bucket first. */
+export function instrumentPriceSeries(comparison: Comparison, instrumentId: string): SeriesPoint[] {
+  return comparison.instrumentPoints
+    .filter((point) => point.instrumentId === instrumentId)
+    .map((point) => ({ periodStart: point.periodStart, value: point.price === null ? null : Number(point.price) }))
+    .sort((left, right) => (left.periodStart < right.periodStart ? -1 : 1));
+}
+
+/** First & last known value of a series and the % change between them (rebasing anchor). */
+export function comparisonChange(points: readonly SeriesPoint[]): {
+  first: number | null;
+  last: number | null;
+  change: number | null;
+} {
+  const known = points.filter((point) => point.value !== null) as Array<{ periodStart: string; value: number }>;
+  const first = known[0]?.value ?? null;
+  const last = known.at(-1)?.value ?? null;
+  const change = first !== null && last !== null && first > 0
+    ? Math.round(((last - first) / first) * 10_000) / 100
+    : null;
+  return { first, last, change };
+}
+
+/**
+ * Overlays the selected accounts (total holding value) and instruments (unit
+ * price) as lines rebased to 0% at each line's first known value, so series in
+ * different currencies and magnitudes stay comparable (fintables-style).
+ */
+export function instrumentComparisonOption(
+  comparison: Comparison,
+  selection: ComparisonSelection,
+): ReportChartOption {
+  const periodPairs = [...new Map<string, string>([
+    ...comparison.accountPoints.map((point) => [point.periodStart, point.period] as const),
+    ...comparison.instrumentPoints.map((point) => [point.periodStart, point.period] as const),
+  ])].sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+  const periodKeys = periodPairs.map(([start]) => start);
+  const labels = periodPairs.map(([, label]) => label);
+
+  const accountName = new Map(comparison.accounts.map((account) => [account.accountId, account.name]));
+  const instrumentById = new Map(comparison.instruments.map((instrument) => [instrument.instrumentId, instrument]));
+
+  const built: Array<{ name: string; currency: string; raw: Map<string, number | null> }> = [];
+  for (const accountId of selection.accountIds) {
+    const name = accountName.get(accountId);
+    if (!name) continue;
+    built.push({
+      name,
+      currency: "TRY",
+      raw: new Map(accountValueSeries(comparison, accountId).map((point) => [point.periodStart, point.value])),
+    });
+  }
+  for (const instrumentId of selection.instrumentIds) {
+    const instrument = instrumentById.get(instrumentId);
+    if (!instrument) continue;
+    built.push({
+      name: instrument.symbol || instrument.name,
+      currency: instrument.currencyCode,
+      raw: new Map(instrumentPriceSeries(comparison, instrumentId).map((point) => [point.periodStart, point.value])),
+    });
+  }
+
+  const series = built.map((entry) => {
+    const values = periodKeys.map((key) => entry.raw.get(key) ?? null);
+    const base = values.find((value): value is number => value !== null && value > 0);
+    return {
+      name: entry.name,
+      type: "line" as const,
+      smooth: true,
+      showSymbol: labels.length < 40,
+      connectNulls: false,
+      data: values.map((value) =>
+        value === null || base === undefined ? null : Math.round(((value - base) / base) * 10_000) / 100),
+    };
+  });
+
+  return {
+    animationDuration: 350,
+    aria: {
+      enabled: true,
+      description: "Seçilen hesap ve yatırım araçlarının dönem başına göre yüzde değişimi.",
+    },
+    color: [...reportChartColors],
+    legend: { bottom: 0, type: "scroll" },
+    tooltip: {
+      trigger: "axis",
+      axisPointer: { type: "cross" },
+      valueFormatter: (value) =>
+        value === null || value === undefined ? "—" : `%${Number(value).toFixed(2)}`,
+    },
+    grid: { left: 18, right: 18, top: 20, bottom: 52, containLabel: true },
+    xAxis: { type: "category", data: labels, axisLabel: { color: "#75827c", hideOverlap: true } },
+    yAxis: {
+      type: "value",
+      axisLabel: { color: "#75827c", formatter: (value: number) => `%${value}` },
+      splitLine: { lineStyle: { color: "#e8ece9" } },
+    },
+    series,
+  };
+}
+
 export interface AssetTreeNode {
   name: string;
   value: number;

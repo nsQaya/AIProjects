@@ -33,11 +33,18 @@ return chart-agnostic DTOs. ECharts option objects must never be sent by the API
 4. Liquidity forecast: opening ledger balance plus scheduled income, expenses and transfers.
 5. Total assets and investment performance: cash, cost basis, as-of-date prices, realized and
    unrealized gains.
+6. Holding change comparison: overlaid lines for any mix of brokerage accounts (total holding
+   value, book base currency) and individual instruments (unit price, native currency), each
+   rebased to 0% at its first known value. The picker is a collapsible tree — accounts on top,
+   their instruments nested; an instrument's "home" account is the one that funded most of it.
 
 `GET /reports/analytics` returns these chart-agnostic datasets in one authorized snapshot. This
 keeps all tabs on the exact same `from`, `to`, `accountIds` and `granularity` scope and prevents
 cross-report timing differences. Investment valuation uses the latest recorded price at or before
 the requested end date; when an instrument has no price, totals conservatively carry its cost basis.
+`instrumentComparison` reuses that same per-bucket price lookup: `instrumentPoints` are raw unit
+prices, `accountPoints` are the summed home-account holding value; percentage rebasing on the
+client makes the cross-currency, cross-magnitude lines comparable.
 
 Every report uses the shared date and account selection and must retain an accessible tabular
 summary alongside the chart.

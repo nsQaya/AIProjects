@@ -114,6 +114,7 @@ function defaultResponse(path: string, options: RequestOptions<unknown>): unknow
       categoryDetail: { breakdown: [], transactions: [] },
       liquidity: { openingBalance: "0", items: [], events: [] },
       investmentValueSeries: [],
+      instrumentComparison: { accounts: [], instruments: [], instrumentPoints: [], accountPoints: [] },
       netWorth: {
         cashBalance: "0",
         investmentCost: "0",

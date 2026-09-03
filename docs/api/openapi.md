@@ -17,9 +17,11 @@ verilmezse tüm hesaplar, `none` ise hiçbir hesap, aksi halde virgülle ayrılm
 seçilir. Finansal toplamlar hesap kapsamına göre sunucuda yeniden hesaplanır.
 
 `GET /reports/analytics` bu ortak filtrelere ek olarak `granularity=day|week|month|year` alır ve
-beş raporun veri setini tek tutarlı snapshot olarak döndürür: gelir/gider/net trendi, hesap
-bakiye geçmişi, kategori-masraf merkezi-işlem detayı, likidite tahmini ve varlık/yatırım
-performansı. Yatırım değerlemesi bitiş tarihinde veya öncesindeki son kayıtlı fiyatı kullanır.
+rapor veri setini tek tutarlı snapshot olarak döndürür: gelir/gider/net trendi, hesap
+bakiye geçmişi, kategori-masraf merkezi-işlem detayı, likidite tahmini, varlık/yatırım
+performansı ve varlık karşılaştırma seti (`instrumentComparison`: enstrüman bazlı birim fiyat
+serisi + hesap bazlı toplam varlık değeri serisi). Yatırım değerlemesi bitiş tarihinde veya
+öncesindeki son kayıtlı fiyatı kullanır.
 
 Piyasa kataloğu ve otomatik fiyat uçları `/investments/market-symbols` ile
 `/investments/prices/*` altındadır. Tarih bazlı fiyat listesi eksik veya halka arz öncesi bir gün

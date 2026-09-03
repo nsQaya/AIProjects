@@ -51,6 +51,32 @@ function impactMoney(value: number): string {
   return `${value > 0 ? "+" : value < 0 ? "−" : ""}${money(Math.abs(value))}`;
 }
 
+/**
+ * Amount shown in the ledger's "Tutar" column. `balanceDelta` is the net effect
+ * on the selected account scope, so a transfer (or FX/adjustment) whose two legs
+ * are both inside the current filter nets to exactly zero — in that case show the
+ * gross amount that actually moved instead of a bare "₺0,00".
+ */
+function ledgerAmount(transaction: TransactionView): {
+  text: string;
+  tone: "income" | "expense" | "transfer";
+  csv: string;
+} {
+  const delta = transaction.ui.balanceDelta;
+  const bothLegsInScope =
+    delta === 0 &&
+    transaction.ui.amount > 0 &&
+    (transaction.ui.kind === "transfer" || transaction.ui.kind === "adjustment");
+  if (bothLegsInScope) {
+    return { text: money(transaction.amount), tone: "transfer", csv: transaction.amount };
+  }
+  return {
+    text: impactMoney(delta),
+    tone: delta < 0 ? "expense" : delta > 0 ? "income" : "transfer",
+    csv: transaction.balanceDelta,
+  };
+}
+
 export function TransactionsPage({
   accounts,
   categories,
@@ -173,7 +199,7 @@ export function TransactionsPage({
         transaction.targetAccountId ? accountById.get(transaction.targetAccountId)?.name ?? transaction.targetAccountName ?? "" : "",
         transaction.costCenterId ? costCenterById.get(transaction.costCenterId)?.name ?? transaction.costCenterName ?? "" : "",
         transaction.categoryId ? categoryById.get(transaction.categoryId)?.name ?? transaction.categoryName ?? "" : "",
-        transaction.balanceDelta,
+        ledgerAmount(transaction).csv,
         transaction.runningBalance,
       ]);
     }
@@ -281,6 +307,7 @@ export function TransactionsPage({
               ? costCenterById.get(transaction.costCenterId)?.name ?? transaction.costCenterName ?? "—"
               : "—";
             const editable = ["income", "expense", "transfer"].includes(transaction.ui.kind);
+            const amount = ledgerAmount(transaction);
             return (
               <div
                 className="table-row"
@@ -292,7 +319,7 @@ export function TransactionsPage({
               >
                 <span className="transaction-name"><i style={{ "--dot": "#287b60" } as CSSProperties}>{transaction.ui.kind === "income" ? "↙" : transaction.ui.kind === "transfer" ? "⇄" : transaction.ui.kind === "opening_balance" ? "↪" : "↗"}</i><b>{transaction.ui.description}</b></span>
                 <span>{costCenter}</span><span>{category}</span><span>{account}</span><span>{dateText(transaction.ui.date)}</span>
-                <strong className={transaction.ui.balanceDelta < 0 ? "expense" : transaction.ui.balanceDelta > 0 ? "income" : "transfer"}>{impactMoney(transaction.ui.balanceDelta)}</strong>
+                <strong className={amount.tone}>{amount.text}</strong>
                 <strong className="running-balance">{money(transaction.runningBalance)}</strong>
                 <span className="row-actions">
                   {editable ? (

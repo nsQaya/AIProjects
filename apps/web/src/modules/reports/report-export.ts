@@ -1,7 +1,13 @@
 import type { ReportAnalyticsResponse } from "@defterx/contracts";
 
-import { money, toNumber } from "../../lib/format";
+import { money, moneyInCurrency, toNumber } from "../../lib/format";
 import type { ExportCell, ExportTable } from "../../lib/table-export";
+import {
+  accountValueSeries,
+  comparisonChange,
+  instrumentPriceSeries,
+  type ComparisonSelection,
+} from "./report-chart-options";
 
 export function reportDate(value: string): string {
   return new Intl.DateTimeFormat("tr-TR", { dateStyle: "medium" }).format(new Date(value));
@@ -27,6 +33,64 @@ type NetWorth = ReportAnalyticsResponse["netWorth"];
 type AccountBalances = ReportAnalyticsResponse["accountBalances"];
 type Liquidity = ReportAnalyticsResponse["liquidity"];
 type DrillTransactions = ReportAnalyticsResponse["categoryDetail"]["transactions"];
+type InstrumentComparison = ReportAnalyticsResponse["instrumentComparison"];
+
+function boundCell(value: number | null, currency: string): ExportCell {
+  return value === null ? "—" : { value, text: moneyInCurrency(value, currency) };
+}
+
+function changeCell(change: number | null): ExportCell {
+  return change === null ? "—" : { value: change, text: `%${change.toFixed(2)}` };
+}
+
+export function instrumentComparisonTable(
+  comparison: InstrumentComparison,
+  selection: ComparisonSelection,
+  meta: string[],
+): ExportTable {
+  const accountName = new Map(comparison.accounts.map((account) => [account.accountId, account.name]));
+  const instrumentById = new Map(comparison.instruments.map((instrument) => [instrument.instrumentId, instrument]));
+
+  const accountRows = selection.accountIds
+    .filter((accountId) => accountName.has(accountId))
+    .map((accountId) => {
+      const { first, last, change } = comparisonChange(accountValueSeries(comparison, accountId));
+      return [
+        accountName.get(accountId)!,
+        "Hesap yekünü",
+        boundCell(first, "TRY"),
+        boundCell(last, "TRY"),
+        changeCell(change),
+      ] satisfies ExportCell[];
+    });
+
+  const instrumentRows = selection.instrumentIds
+    .map((instrumentId) => instrumentById.get(instrumentId))
+    .filter((instrument): instrument is NonNullable<typeof instrument> => Boolean(instrument))
+    .map((instrument) => {
+      const { first, last, change } = comparisonChange(instrumentPriceSeries(comparison, instrument.instrumentId));
+      return [
+        instrument.symbol ? `${instrument.name} (${instrument.symbol})` : instrument.name,
+        instrument.assetTypeName,
+        boundCell(first, instrument.currencyCode),
+        boundCell(last, instrument.currencyCode),
+        changeCell(change),
+      ] satisfies ExportCell[];
+    });
+
+  return {
+    title: "Varlık Değişim Karşılaştırması",
+    meta,
+    columns: [
+      { header: "Seri" },
+      { header: "Tür" },
+      { header: "Başlangıç", align: "right" },
+      { header: "Son", align: "right" },
+      { header: "Değişim", align: "right" },
+    ],
+    rows: [...accountRows, ...instrumentRows],
+  };
+}
 
 export function netWorthPerformanceTable(netWorth: NetWorth, meta: string[]): ExportTable {
   return {
@@ -82,18 +146,20 @@ export function accountBalancesTable(balances: AccountBalances, meta: string[]):
 
 export function liquidityEventsTable(liquidity: Liquidity, meta: string[]): ExportTable {
   return {
-    title: "Likidite — Bekleyen Planlı İşlemler",
+    title: "Likidite — İşlemler ve Planlar",
     meta,
     columns: [
       { header: "Tarih" },
-      { header: "Planlı işlem" },
+      { header: "İşlem" },
       { header: "Tür" },
+      { header: "Durum" },
       { header: "Etki (₺)", align: "right" },
     ],
     rows: liquidity.events.map((event) => [
       reportDate(event.scheduledAt),
       event.title,
       event.type,
+      event.realized ? "Gerçekleşen" : "Planlı",
       tl(event.impact),
     ]),
   };

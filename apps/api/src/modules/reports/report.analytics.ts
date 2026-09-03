@@ -25,10 +25,21 @@ const formats: Record<ReportGranularity, string> = {
 };
 
 const accountScope = `
-  SELECT id,name,currency_code,sort_order
-  FROM accounts
-  WHERE book_id=$1 AND is_system=false AND deleted_at IS NULL
-    AND ($5::boolean OR id=ANY($4::uuid[]))`;
+  SELECT a.id,a.name,a.currency_code,a.sort_order,
+    -- Latest known TCMB rate (TRY per unit): 1 for the base currency, 0 when a
+    -- foreign currency has no synced rate yet (so it drops out instead of mixing
+    -- units). Per-account balances must be rebuilt from native amounts x this
+    -- rate, never from base_amount, whose per-entry TRY snapshots were taken at
+    -- whatever rate applied when each leg posted and no longer net to the
+    -- current value for a foreign account.
+    CASE WHEN a.currency_code='TRY' THEN 1 ELSE COALESCE(fx.try_rate,0) END AS try_rate
+  FROM accounts a
+  LEFT JOIN LATERAL (
+    SELECT try_rate FROM currency_daily_rates
+    WHERE currency_code=a.currency_code ORDER BY rate_date DESC LIMIT 1
+  ) fx ON a.currency_code<>'TRY'
+  WHERE a.book_id=$1 AND a.is_system=false AND a.deleted_at IS NULL
+    AND ($5::boolean OR a.id=ANY($4::uuid[]))`;
 
 function addDecimalStrings(left: string, right: string): string {
   const parts = [left, right].map((value) => {
@@ -60,7 +71,7 @@ export async function loadReportAnalytics(
   const scopeValues = [bookId, from, to, accountIds, includeAllAccounts];
   const seriesValues = [...scopeValues, granularity, interval, format];
 
-  const [book, trend, accountBalances, breakdown, transactions, liquidity, events, investments, investmentValues, cash, cashAccounts] =
+  const [book, trend, accountBalances, breakdown, transactions, liquidity, events, investments, investmentValues, cash, cashAccounts, instrumentMeta, instrumentSeries, accountSeries] =
     await Promise.all([
       pool.query<{ currencyCode: string }>(
         `SELECT base_currency AS "currencyCode" FROM books WHERE id=$1 AND deleted_at IS NULL`,
@@ -95,7 +106,7 @@ export async function loadReportAnalytics(
          FROM periods p
          LEFT JOIN totals t ON t.bucket=p.bucket
          LEFT JOIN LATERAL (
-           SELECT COALESCE(SUM(CASE WHEN e.direction='DEBIT' THEN e.base_amount ELSE -e.base_amount END),0) balance
+           SELECT COALESCE(SUM((CASE WHEN e.direction='DEBIT' THEN e.amount ELSE -e.amount END) * sa.try_rate),0) balance
            FROM transaction_entries e
            JOIN transactions bt ON bt.id=e.transaction_id AND bt.status='POSTED' AND bt.transaction_type<>'REVERSAL'
            JOIN selected_accounts sa ON sa.id=e.account_id
@@ -173,26 +184,26 @@ export async function loadReportAnalytics(
         `WITH selected_accounts AS (${accountScope}), periods AS (
            SELECT generate_series(date_trunc($6,$2::timestamptz),date_trunc($6,$3::timestamptz),$7::interval) bucket
          ), opening AS (
-           SELECT COALESCE(SUM(CASE WHEN e.direction='DEBIT' THEN e.base_amount ELSE -e.base_amount END),0) balance
+           SELECT COALESCE(SUM((CASE WHEN e.direction='DEBIT' THEN e.amount ELSE -e.amount END) * sa.try_rate),0) balance
            FROM selected_accounts sa
            JOIN transaction_entries e ON e.account_id=sa.id
            JOIN transactions t ON t.id=e.transaction_id AND t.status='POSTED' AND t.transaction_type<>'REVERSAL'
            WHERE t.transaction_date < $2::timestamptz
          ), event_impacts AS (
            SELECT t.transaction_date AS at,
-             CASE WHEN e.direction='DEBIT' THEN e.base_amount ELSE -e.base_amount END impact
+             (CASE WHEN e.direction='DEBIT' THEN e.amount ELSE -e.amount END) * sa.try_rate impact
            FROM selected_accounts sa
            JOIN transaction_entries e ON e.account_id=sa.id
            JOIN transactions t ON t.id=e.transaction_id AND t.status='POSTED' AND t.transaction_type<>'REVERSAL'
            WHERE t.transaction_date BETWEEN $2 AND $3
            UNION ALL
            SELECT s.scheduled_at AS at,
-             CASE WHEN s.transaction_type IN ('INCOME','COLLECTION','SALE') THEN s.amount ELSE -s.amount END impact
+             (CASE WHEN s.transaction_type IN ('INCOME','COLLECTION','SALE') THEN s.amount ELSE -s.amount END) * sa.try_rate impact
            FROM scheduled_transactions s JOIN selected_accounts sa ON sa.id=s.account_id
            WHERE s.book_id=$1 AND s.status IN ('PENDING','OVERDUE') AND s.deleted_at IS NULL
              AND s.scheduled_at BETWEEN $2 AND $3
            UNION ALL
-           SELECT s.scheduled_at AS at,s.amount impact
+           SELECT s.scheduled_at AS at,s.amount * sa.try_rate impact
            FROM scheduled_transactions s JOIN selected_accounts sa ON sa.id=s.target_account_id
            WHERE s.book_id=$1 AND s.transaction_type='TRANSFER'
              AND s.status IN ('PENDING','OVERDUE') AND s.deleted_at IS NULL
@@ -214,20 +225,32 @@ export async function loadReportAnalytics(
       ),
       pool.query(
         `WITH selected_accounts AS (${accountScope}), impacts AS (
+           -- Realized: already-posted transactions dated inside the window, the
+           -- same rows the chart's event_impacts adds on top of the plans. Listing
+           -- them here lets every chart bar be reconciled against a table row.
+           SELECT t.id,t.title,t.transaction_date AS "scheduledAt",t.transaction_type AS type,
+             (CASE WHEN e.direction='DEBIT' THEN e.amount ELSE -e.amount END) * sa.try_rate impact,
+             true AS realized
+           FROM selected_accounts sa
+           JOIN transaction_entries e ON e.account_id=sa.id
+           JOIN transactions t ON t.id=e.transaction_id AND t.status='POSTED' AND t.transaction_type<>'REVERSAL'
+           WHERE t.transaction_date BETWEEN $2 AND $3
+           UNION ALL
            SELECT s.id,s.title,s.scheduled_at AS "scheduledAt",s.transaction_type AS type,
-             CASE WHEN s.transaction_type IN ('INCOME','COLLECTION','SALE') THEN s.amount ELSE -s.amount END impact
+             (CASE WHEN s.transaction_type IN ('INCOME','COLLECTION','SALE') THEN s.amount ELSE -s.amount END) * sa.try_rate impact,
+             false AS realized
            FROM scheduled_transactions s JOIN selected_accounts sa ON sa.id=s.account_id
            WHERE s.book_id=$1 AND s.status IN ('PENDING','OVERDUE') AND s.deleted_at IS NULL
              AND s.scheduled_at BETWEEN $2 AND $3
            UNION ALL
-           SELECT s.id,s.title,s.scheduled_at,s.transaction_type,s.amount impact
+           SELECT s.id,s.title,s.scheduled_at,s.transaction_type,s.amount * sa.try_rate impact,false AS realized
            FROM scheduled_transactions s JOIN selected_accounts sa ON sa.id=s.target_account_id
            WHERE s.book_id=$1 AND s.transaction_type='TRANSFER'
              AND s.status IN ('PENDING','OVERDUE') AND s.deleted_at IS NULL
              AND s.scheduled_at BETWEEN $2 AND $3
          )
-         SELECT id,title,"scheduledAt",type,SUM(impact)::text impact
-         FROM impacts GROUP BY id,title,"scheduledAt",type
+         SELECT id,title,"scheduledAt",type,realized,SUM(impact)::text impact
+         FROM impacts GROUP BY id,title,"scheduledAt",type,realized
          HAVING SUM(impact)<>0 ORDER BY "scheduledAt",title LIMIT 200`,
         scopeValues,
       ),
@@ -398,6 +421,149 @@ export async function loadReportAnalytics(
          ORDER BY bal.native * CASE WHEN a.currency_code='TRY' THEN 1 ELSE COALESCE(fx.try_rate,0) END DESC`,
         scopeValues,
       ),
+      pool.query<{
+        instrumentId: string; name: string; symbol: string | null;
+        assetTypeName: string; currencyCode: string;
+        accountId: string | null; accountName: string | null;
+      }>(
+        // "Varlık Değişim Karşılaştırması" picker metadata: every instrument with
+        // a non-deleted lot in the scoped accounts, plus its "home" account - the
+        // one that funded the largest share of the position (same dominant-account
+        // rule the Investments page groups by). Bonus-issue / legacy lots with no
+        // account leave accountId null ("Bağlanmamış"). The $2 tautology keeps
+        // every $N in the shared params array typed (see param gotcha).
+        `WITH selected_accounts AS (${accountScope}), lot_scope AS (
+           SELECT DISTINCT l.instrument_id
+           FROM investment_lots l
+           LEFT JOIN selected_accounts sa ON sa.id=l.account_id
+           WHERE l.book_id=$1 AND l.deleted_at IS NULL AND l.purchased_at <= $3::timestamptz
+             AND $2::timestamptz <= $3::timestamptz
+             AND ($5::boolean OR sa.id IS NOT NULL)
+         ), dominant AS (
+           SELECT DISTINCT ON (agg.instrument_id) agg.instrument_id,agg.account_id
+           FROM (
+             SELECT l.instrument_id,l.account_id,SUM(l.quantity) qty
+             FROM investment_lots l
+             WHERE l.book_id=$1 AND l.deleted_at IS NULL AND l.account_id IS NOT NULL
+               AND l.purchased_at <= $3::timestamptz
+             GROUP BY l.instrument_id,l.account_id
+           ) agg
+           ORDER BY agg.instrument_id,agg.qty DESC,agg.account_id
+         )
+         SELECT i.id AS "instrumentId",i.name,i.symbol,t.name AS "assetTypeName",
+                i.currency_code AS "currencyCode",
+                d.account_id AS "accountId",acc.name AS "accountName"
+         FROM lot_scope ls
+         JOIN investment_instruments i ON i.id=ls.instrument_id AND i.deleted_at IS NULL
+         JOIN investment_asset_types t ON t.id=i.asset_type_id
+         LEFT JOIN dominant d ON d.instrument_id=i.id
+         LEFT JOIN accounts acc ON acc.id=d.account_id
+         ORDER BY t.name,i.name`,
+        scopeValues,
+      ),
+      pool.query<{ period: string; periodStart: string; instrumentId: string; price: string | null }>(
+        // Per-instrument unit price (native currency, no FX conversion) at or
+        // before each bucket, reusing investmentValueSeries' price-lookup shape:
+        // recorded investment_prices first, else the market daily close. No
+        // position-quantity filter - the line runs from the window start so the
+        // frontend can rebase it to 0% at period start.
+        `WITH selected_accounts AS (${accountScope}), periods AS (
+           SELECT generate_series(date_trunc($6,$2::timestamptz),date_trunc($6,$3::timestamptz),$7::interval) bucket
+         ), scoped_instruments AS (
+           SELECT DISTINCT l.instrument_id
+           FROM investment_lots l
+           LEFT JOIN selected_accounts sa ON sa.id=l.account_id
+           WHERE l.book_id=$1 AND l.deleted_at IS NULL AND l.purchased_at <= $3::timestamptz
+             AND ($5::boolean OR sa.id IS NOT NULL)
+         )
+         SELECT to_char(p.bucket,$8) period,p.bucket AS "periodStart",
+                si.instrument_id AS "instrumentId",
+                CASE WHEN lp.price IS NULL THEN NULL ELSE lp.price::text END AS price
+         FROM periods p
+         CROSS JOIN scoped_instruments si
+         JOIN investment_instruments i ON i.id=si.instrument_id AND i.deleted_at IS NULL
+         LEFT JOIN LATERAL (
+           SELECT candidate.price FROM (
+             SELECT ip.price,ip.priced_at,0 priority FROM investment_prices ip
+             WHERE ip.instrument_id=i.id AND ip.priced_at <= p.bucket
+             UNION ALL
+             SELECT mp.close,(mp.price_date::timestamp AT TIME ZONE 'Europe/Istanbul'),1 priority
+             FROM market_daily_prices mp
+             WHERE mp.market_symbol_id=i.market_symbol_id
+               AND mp.price_date<=(p.bucket AT TIME ZONE 'Europe/Istanbul')::date
+           ) candidate ORDER BY candidate.priced_at DESC,candidate.priority LIMIT 1
+         ) lp ON true
+         ORDER BY si.instrument_id,p.bucket`,
+        seriesValues,
+      ),
+      pool.query<{ period: string; periodStart: string; accountId: string; value: string }>(
+        // Per-account total holding value (book base currency) at each bucket, so
+        // the comparison can plot "A hesabının yekünü" against "B hesabının
+        // yekünü". Each instrument's whole net position is attributed to its
+        // dominant (home) account; net quantity = lifetime purchases - sales as of
+        // the bucket, valued at the latest price x latest FX rate, exactly like
+        // investmentValueSeries but grouped by the home account instead of summed.
+        `WITH selected_accounts AS (${accountScope}), periods AS (
+           SELECT generate_series(date_trunc($6,$2::timestamptz),date_trunc($6,$3::timestamptz),$7::interval) bucket
+         ), dominant AS (
+           SELECT DISTINCT ON (agg.instrument_id) agg.instrument_id,agg.account_id
+           FROM (
+             SELECT l.instrument_id,l.account_id,SUM(l.quantity) qty
+             FROM investment_lots l
+             WHERE l.book_id=$1 AND l.deleted_at IS NULL AND l.account_id IS NOT NULL
+               AND l.purchased_at <= $3::timestamptz
+             GROUP BY l.instrument_id,l.account_id
+           ) agg
+           ORDER BY agg.instrument_id,agg.qty DESC,agg.account_id
+         ), purchased AS (
+           SELECT l.instrument_id,p.bucket,
+             SUM(l.quantity) FILTER (WHERE l.purchased_at <= p.bucket) qty
+           FROM periods p CROSS JOIN investment_lots l
+           WHERE l.book_id=$1 AND l.deleted_at IS NULL
+           GROUP BY l.instrument_id,p.bucket
+         ), sold AS (
+           SELECT s.instrument_id,p.bucket,
+             SUM(s.quantity) FILTER (WHERE s.sold_at <= p.bucket) qty
+           FROM periods p CROSS JOIN investment_sales s
+           WHERE s.book_id=$1 AND s.deleted_at IS NULL
+           GROUP BY s.instrument_id,p.bucket
+         ), positions AS (
+           SELECT pu.bucket,pu.instrument_id,d.account_id,
+             GREATEST(COALESCE(pu.qty,0)-COALESCE(so.qty,0),0) net_qty
+           FROM purchased pu
+           JOIN dominant d ON d.instrument_id=pu.instrument_id
+           LEFT JOIN sold so ON so.instrument_id=pu.instrument_id AND so.bucket=pu.bucket
+         ), valued AS (
+           SELECT pos.account_id,pos.bucket,
+             SUM(pos.net_qty*COALESCE(latest_price.price,0)*COALESCE(fx.try_rate,1)) value
+           FROM positions pos
+           JOIN investment_instruments i ON i.id=pos.instrument_id AND i.deleted_at IS NULL
+           LEFT JOIN LATERAL (
+             SELECT candidate.price FROM (
+               SELECT ip.price,ip.priced_at,0 priority FROM investment_prices ip
+               WHERE ip.instrument_id=i.id AND ip.priced_at <= pos.bucket
+               UNION ALL
+               SELECT mp.close,(mp.price_date::timestamp AT TIME ZONE 'Europe/Istanbul'),1 priority
+               FROM market_daily_prices mp WHERE mp.market_symbol_id=i.market_symbol_id
+                 AND mp.price_date<=(pos.bucket AT TIME ZONE 'Europe/Istanbul')::date
+             ) candidate ORDER BY candidate.priced_at DESC,candidate.priority LIMIT 1
+           ) latest_price ON true
+           LEFT JOIN LATERAL (
+             SELECT try_rate FROM currency_daily_rates
+             WHERE currency_code=i.currency_code ORDER BY rate_date DESC LIMIT 1
+           ) fx ON i.currency_code<>'TRY'
+           WHERE pos.net_qty>0
+           GROUP BY pos.account_id,pos.bucket
+         )
+         SELECT to_char(p.bucket,$8) period,p.bucket AS "periodStart",
+                sa.id AS "accountId",COALESCE(v.value,0)::text value
+         FROM periods p
+         CROSS JOIN selected_accounts sa
+         LEFT JOIN valued v ON v.account_id=sa.id AND v.bucket=p.bucket
+         WHERE sa.id IN (SELECT account_id FROM dominant)
+         ORDER BY sa.id,p.bucket`,
+        seriesValues,
+      ),
     ]);
 
   const balanceRows = accountBalances.rows as Array<{
@@ -445,6 +611,25 @@ export async function loadReportAnalytics(
       events: events.rows as ReportAnalyticsResponse["liquidity"]["events"],
     },
     investmentValueSeries: investmentValues.rows as ReportAnalyticsResponse["investmentValueSeries"],
+    instrumentComparison: (() => {
+      const instruments = instrumentMeta.rows as ReportAnalyticsResponse["instrumentComparison"]["instruments"];
+      const accountPoints = accountSeries.rows as ReportAnalyticsResponse["instrumentComparison"]["accountPoints"];
+      const names = new Map(
+        instruments
+          .filter((instrument) => instrument.accountId && instrument.accountName)
+          .map((instrument) => [instrument.accountId as string, instrument.accountName as string]),
+      );
+      const accounts = [...new Set(accountPoints.map((point) => point.accountId))].map((accountId) => ({
+        accountId,
+        name: names.get(accountId) ?? "Hesap",
+      }));
+      return {
+        accounts,
+        instruments,
+        instrumentPoints: instrumentSeries.rows as ReportAnalyticsResponse["instrumentComparison"]["instrumentPoints"],
+        accountPoints,
+      };
+    })(),
     netWorth: {
       cashBalance,
       investmentCost: investmentTotals.investmentCost ?? "0",
