@@ -14,7 +14,8 @@ import {
   updateAssetType,updateInstrument,updateLot,updateSale,
 } from "./investment.service";
 import {
-  createPriceSyncRun,latestPriceSyncRun,listBookInstrumentPrices,reclaimStalePriceRuns,searchMarketSymbols,
+  createPriceSyncRun,findOrCreateMarketSymbol,latestPriceSyncRun,listBookInstrumentPrices,
+  reclaimStalePriceRuns,searchMarketSymbols,
 } from "../market-data/market-data.service";
 
 export const investmentRoutes=new Hono<AppEnv>();
@@ -47,6 +48,13 @@ investmentRoutes.get("/market-symbols",async c=>{
   if(result.items.length===0){
     const catalog=await client.query(`SELECT 1 FROM market_symbols LIMIT 1`);
     if(!catalog.rowCount)await c.env.JOBS.send({type:"SYNC_MARKET_CATALOG"});
+    // Not in the weekly catalog (e.g. a fresh IPO) - try resolving it live on Yahoo.
+    else if(/^[A-Za-z0-9][A-Za-z0-9.-]{2,19}$/.test(query.trim())){
+      try{
+        const found=await findOrCreateMarketSymbol(client,query.trim(),market);
+        if(found)return c.json({items:[found]});
+      }catch{/* Yahoo unavailable - fall through to the empty result */}
+    }
   }
   return c.json(result);
 });

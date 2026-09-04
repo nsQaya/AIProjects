@@ -5,6 +5,7 @@ import {
   fetchYahooLivePrices,
   fetchYahooPrices,
   fetchYahooSplits,
+  resolveYahooSymbol,
   type MarketCatalogItem,
 } from "./market-data.provider";
 import { fetchTefasFundPrices } from "../funds/fund.provider";
@@ -135,6 +136,44 @@ export async function searchMarketSymbols(client: DbClient, query: string, marke
     [market??null,normalized,limit],
   );
   return { items: result.rows };
+}
+
+const marketSymbolProjection = `id,provider_symbol AS "providerSymbol",exchange_code AS "exchangeCode",
+  market,instrument_type AS "instrumentType",name,currency_code AS "currencyCode"`;
+
+// Catalog search came back empty and the query looks like a ticker - probe Yahoo
+// directly so a just-listed company (not in the weekly KAP/Nasdaq catalog yet)
+// can still be linked for automatic prices. On a hit the symbol is persisted and
+// returned in the same shape as searchMarketSymbols.
+//
+// It keeps the market's normal catalog_source (there is no dedicated one without
+// a schema change) but parks last_seen_at far in the future so syncMarketCatalog's
+// "not seen this run -> deactivate" sweep leaves it alone until KAP/Nasdaq lists
+// it for real - at which point upsertCatalogBatch's ON CONFLICT pulls last_seen_at
+// back to a normal timestamp and it becomes an ordinary catalog row.
+const unsweptLastSeen = "2999-01-01T00:00:00Z";
+
+export async function findOrCreateMarketSymbol(
+  client: DbClient,
+  query: string,
+  market: "BIST" | "US" | undefined,
+  fetcher: typeof fetch = fetch,
+) {
+  const info = await resolveYahooSymbol(query, market, fetcher);
+  if (!info) return null;
+  const catalogSource = info.market === "BIST" ? "KAP" : "NASDAQ_TRADER";
+  const result = await client.query(
+    `INSERT INTO market_symbols(
+       catalog_source,price_provider,provider_symbol,exchange_code,market,instrument_type,name,
+       currency_code,first_trade_date,is_active,first_seen_at,last_seen_at
+     ) VALUES($1,'YAHOO',$2,$3,$4,$5,$6,$7,$8,true,now(),$9)
+     ON CONFLICT(price_provider,provider_symbol) DO UPDATE SET
+       is_active=true,last_seen_at=$9,updated_at=now()
+     RETURNING ${marketSymbolProjection}`,
+    [catalogSource,info.providerSymbol,info.exchangeCode,info.market,info.instrumentType,info.name,
+     info.currencyCode,info.firstTradeDate,unsweptLastSeen],
+  );
+  return result.rows[0] ?? null;
 }
 
 const runProjection = `id,kind,target_date::text AS "targetDate",status,total_items AS "totalItems",

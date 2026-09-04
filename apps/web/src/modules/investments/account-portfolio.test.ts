@@ -3,6 +3,7 @@ import type {
   InvestmentBrokerageAccount,
   InvestmentLotViewModel,
   InvestmentPortfolioViewModel,
+  InvestmentSaleViewModel,
 } from "./investment-types";
 
 function account(overrides: Partial<InvestmentBrokerageAccount> & { id: string }): InvestmentBrokerageAccount {
@@ -60,28 +61,93 @@ function lot(
   };
 }
 
+function sale(
+  overrides: Partial<InvestmentSaleViewModel> & { id: string; instrumentId: string; destinationAccountId: string },
+): InvestmentSaleViewModel {
+  return {
+    instrumentName: overrides.instrumentId,
+    symbol: null,
+    currencyCode: "TRY",
+    destinationAccountName: overrides.destinationAccountId,
+    quantity: "1",
+    unitPrice: "120",
+    proceeds: "120",
+    costBasis: "100",
+    gain: "20",
+    soldAt: "2026-06-01T09:00:00.000Z",
+    notes: null,
+    version: 1,
+    ...overrides,
+  };
+}
+
 describe("summarizeAccountPortfolio", () => {
-  it("files a position under the account that purchased the most of it", () => {
+  it("splits a position across every account that holds it, proportional to net units", () => {
+    const summary = summarizeAccountPortfolio(
+      [position({ instrumentId: "tp2", quantity: "10", costBasis: "1000", currentValue: "1200",
+        costBasisTRY: "1000", currentValueTRY: "1200", gain: "200", gainTRY: "200" })],
+      [
+        lot({ id: "l1", instrumentId: "tp2", accountId: "foneria", quantity: "6" }),
+        lot({ id: "l2", instrumentId: "tp2", accountId: "piapiri", quantity: "4" }),
+      ],
+      [],
+      [account({ id: "foneria" }), account({ id: "piapiri" })],
+    );
+
+    const foneria = summary.groups.find((g) => g.accountId === "foneria")!;
+    const piapiri = summary.groups.find((g) => g.accountId === "piapiri")!;
+    expect(foneria.positions).toHaveLength(1);
+    expect(piapiri.positions).toHaveLength(1);
+    expect(foneria.positions[0]!.quantity).toBe("6");
+    expect(piapiri.positions[0]!.quantity).toBe("4");
+    expect(foneria.positions[0]!.currentValueTRY).toBe("720");
+    expect(piapiri.positions[0]!.currentValueTRY).toBe("480");
+    // Slices still add up to the whole position.
+    expect(summary.positionsValue).toBe(1200);
+    expect(foneria.positionsValue + piapiri.positionsValue).toBeCloseTo(1200);
+    expect(summary.groups.some((g) => g.accountId === null)).toBe(false);
+  });
+
+  it("keeps a single-account position whole", () => {
     const summary = summarizeAccountPortfolio(
       [position({ instrumentId: "thyao" })],
       [
         lot({ id: "l1", instrumentId: "thyao", accountId: "acct-a", quantity: "6" }),
-        lot({ id: "l2", instrumentId: "thyao", accountId: "acct-b", quantity: "4" }),
+        lot({ id: "l2", instrumentId: "thyao", accountId: "acct-a", quantity: "4" }),
       ],
+      [],
       [account({ id: "acct-a" }), account({ id: "acct-b" })],
     );
 
     const a = summary.groups.find((g) => g.accountId === "acct-a")!;
     const b = summary.groups.find((g) => g.accountId === "acct-b")!;
     expect(a.positions.map((p) => p.instrumentId)).toEqual(["thyao"]);
+    expect(a.positions[0]!.quantity).toBe("10");
     expect(b.positions).toEqual([]);
-    expect(summary.groups.some((g) => g.accountId === null)).toBe(false);
+  });
+
+  it("attributes a sale to the account whose cash received it when splitting", () => {
+    // Bought 6 at foneria + 4 at piapiri, then sold 4 back through piapiri:
+    // net is foneria 6, piapiri 0 -> the whole open position sits at foneria.
+    const summary = summarizeAccountPortfolio(
+      [position({ instrumentId: "tp2", quantity: "6" })],
+      [
+        lot({ id: "l1", instrumentId: "tp2", accountId: "foneria", quantity: "6" }),
+        lot({ id: "l2", instrumentId: "tp2", accountId: "piapiri", quantity: "4" }),
+      ],
+      [sale({ id: "s1", instrumentId: "tp2", destinationAccountId: "piapiri", quantity: "4" })],
+      [account({ id: "foneria" }), account({ id: "piapiri" })],
+    );
+
+    expect(summary.groups.find((g) => g.accountId === "foneria")!.positions).toHaveLength(1);
+    expect(summary.groups.find((g) => g.accountId === "piapiri")!.positions).toEqual([]);
   });
 
   it("routes a position with no account-linked lot to the unlinked group", () => {
     const summary = summarizeAccountPortfolio(
       [position({ instrumentId: "old", currentValueTRY: "500", costBasisTRY: "400" })],
       [lot({ id: "l1", instrumentId: "old", accountId: null })],
+      [],
       [account({ id: "acct-a", displayBalance: "100" })],
     );
 
@@ -99,6 +165,7 @@ describe("summarizeAccountPortfolio", () => {
         lot({ id: "l1", instrumentId: "thyao", accountId: "acct-a", quantity: "10" }),
         lot({ id: "l2", instrumentId: "thyao", accountId: null, quantity: "5", kind: "CAPITAL_INCREASE" }),
       ],
+      [],
       [account({ id: "acct-a" })],
     );
 
@@ -108,6 +175,7 @@ describe("summarizeAccountPortfolio", () => {
 
   it("still yields a cash-only group for a live account with no positions", () => {
     const summary = summarizeAccountPortfolio(
+      [],
       [],
       [],
       [account({ id: "acct-a", displayBalance: "2500.50" })],
@@ -124,6 +192,7 @@ describe("summarizeAccountPortfolio", () => {
     const summary = summarizeAccountPortfolio(
       [position({ instrumentId: "thyao" })],
       [lot({ id: "l1", instrumentId: "thyao", accountId: "live", quantity: "10" })],
+      [],
       [
         account({ id: "live", displayBalance: "100" }),
         account({ id: "empty-archived", isArchived: true, displayBalance: "0" }),
@@ -141,6 +210,7 @@ describe("summarizeAccountPortfolio", () => {
     const summary = summarizeAccountPortfolio(
       [position({ instrumentId: "aapl", currencyCode: "USD", currentValueTRY: "21000" })],
       [lot({ id: "l1", instrumentId: "aapl", accountId: "piapiri-usd", currencyCode: "USD" })],
+      [],
       [
         account({
           id: "piapiri-usd",
@@ -169,6 +239,7 @@ describe("summarizeAccountPortfolio", () => {
         lot({ id: "l1", instrumentId: "priced", accountId: "acct-a" }),
         lot({ id: "l2", instrumentId: "unpriced", accountId: "acct-a" }),
       ],
+      [],
       [account({ id: "acct-a", displayBalance: "300" })],
     );
 

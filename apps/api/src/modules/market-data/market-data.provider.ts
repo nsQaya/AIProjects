@@ -266,6 +266,55 @@ export async function fetchYahooLivePrices(
   return { failedSymbols, points };
 }
 
+export interface ResolvedYahooSymbol {
+  currencyCode: string;
+  exchangeCode: string;
+  firstTradeDate: string | null;
+  instrumentType: "EQUITY" | "ETF" | "OTHER";
+  market: "BIST" | "US";
+  name: string;
+  providerSymbol: string;
+}
+
+// Live lookup for a ticker the weekly catalog does not carry yet (fresh IPOs).
+// Probes the chart endpoint's meta block: a real listing comes back with a
+// currency, an exchange and a positive regularMarketPrice. For a bare ticker we
+// try the Borsa Istanbul form (`.IS`) first, then the US form.
+export async function resolveYahooSymbol(
+  rawSymbol: string,
+  market: "BIST" | "US" | undefined,
+  fetcher: typeof fetch = fetch,
+): Promise<ResolvedYahooSymbol | null> {
+  const ticker = rawSymbol.trim().toUpperCase();
+  if (!/^[A-Z0-9][A-Z0-9.-]{0,19}$/.test(ticker)) return null;
+  const withIS = ticker.endsWith(".IS") ? ticker : `${ticker}.IS`;
+  // Unspecified market is treated as BIST-only: the US catalog is comprehensive,
+  // so an unqualified bare-ticker probe there just risks matching an unrelated
+  // US listing while the user is still mid-typing a BIST code.
+  const candidates = market === "US" ? [ticker] : [withIS];
+  for (const providerSymbol of candidates) {
+    const url = new URL(`${endpoints.yahooChart}/${encodeURIComponent(providerSymbol)}`);
+    url.searchParams.set("range", "5d");
+    url.searchParams.set("interval", "1d");
+    const payload = await yahooJson(url.toString(), fetcher);
+    const meta = payload?.chart?.result?.[0]?.meta;
+    if (!meta || !decimal(meta.regularMarketPrice)) continue;
+    const isBist = providerSymbol.endsWith(".IS") || String(meta.exchangeName ?? "").toUpperCase() === "IST";
+    const type = String(meta.instrumentType ?? "EQUITY").toUpperCase();
+    const rawName = String(meta.longName ?? meta.shortName ?? "").trim() || providerSymbol.replace(/\.IS$/, "");
+    return {
+      currencyCode: String(meta.currency ?? (isBist ? "TRY" : "USD")).slice(0, 3).toUpperCase(),
+      exchangeCode: isBist ? "BIST" : String(meta.exchangeName ?? "US").slice(0, 20),
+      firstTradeDate: utcDate(meta.firstTradeDate),
+      instrumentType: type === "ETF" ? "ETF" : type === "EQUITY" ? "EQUITY" : "OTHER",
+      market: isBist ? "BIST" : "US",
+      name: safeName(rawName),
+      providerSymbol,
+    };
+  }
+  return null;
+}
+
 export async function fetchYahooSplits(
   providerSymbol: string,
   fetcher: typeof fetch = fetch,

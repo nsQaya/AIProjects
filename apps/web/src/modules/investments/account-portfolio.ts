@@ -5,6 +5,7 @@ import type {
   InvestmentBrokerageAccount,
   InvestmentLotViewModel,
   InvestmentPortfolioViewModel,
+  InvestmentSaleViewModel,
 } from "./investment-types";
 
 /** One brokerage account (or the "unlinked" bucket) with the positions funded through it. */
@@ -38,30 +39,51 @@ export interface AccountPortfolioSummary {
 }
 
 /**
- * Picks the account that funded the most of an instrument's position: the
- * account_id with the largest purchased quantity among lots that actually name
- * an account. Lots with no account (old un-linked lots, bonus-issue capital
- * increases) never win — the position lives wherever the real money went in.
- * Returns null when no lot names an account.
+ * Net open units of an instrument per brokerage account: units bought through
+ * that account (its lots) minus units whose sale proceeds landed back in it
+ * (sales carry the destination account). Un-linked lots — old data, bonus-issue
+ * capital increases — collect under the `null` key. Accounts that no longer hold
+ * any of the instrument are simply absent.
  */
-function dominantAccountId(
+function netUnitsByAccount(
   instrumentId: UUID,
   lots: readonly InvestmentLotViewModel[],
-): UUID | null {
-  const byAccount = new Map<UUID, number>();
+  sales: readonly InvestmentSaleViewModel[],
+): Map<UUID | null, number> {
+  const net = new Map<UUID | null, number>();
   for (const lot of lots) {
-    if (lot.instrumentId !== instrumentId || lot.accountId === null) continue;
-    byAccount.set(lot.accountId, (byAccount.get(lot.accountId) ?? 0) + toNumber(lot.quantity));
+    if (lot.instrumentId !== instrumentId) continue;
+    net.set(lot.accountId, (net.get(lot.accountId) ?? 0) + toNumber(lot.quantity));
   }
-  let winner: UUID | null = null;
-  let best = -Infinity;
-  for (const [accountId, quantity] of byAccount) {
-    if (quantity > best) {
-      best = quantity;
-      winner = accountId;
-    }
+  for (const sale of sales) {
+    if (sale.instrumentId !== instrumentId) continue;
+    net.set(sale.destinationAccountId, (net.get(sale.destinationAccountId) ?? 0) - toNumber(sale.quantity));
   }
-  return winner;
+  return net;
+}
+
+/**
+ * A slice of an aggregated position: every amount/quantity field multiplied by
+ * `fraction`, while ratio-style fields (unit price, gain %) stay as they are.
+ * `fraction >= 1` returns the position untouched.
+ */
+function slicePosition(
+  base: InvestmentPortfolioViewModel,
+  fraction: number,
+): InvestmentPortfolioViewModel {
+  if (fraction >= 1) return base;
+  const scale = (value: MoneyString | null): MoneyString | null =>
+    value === null ? null : String(Number((toNumber(value) * fraction).toFixed(6)));
+  return {
+    ...base,
+    quantity: scale(base.quantity)!,
+    costBasis: scale(base.costBasis)!,
+    currentValue: scale(base.currentValue),
+    gain: scale(base.gain),
+    costBasisTRY: scale(base.costBasisTRY),
+    currentValueTRY: scale(base.currentValueTRY),
+    gainTRY: scale(base.gainTRY),
+  };
 }
 
 function positionsValue(positions: readonly InvestmentPortfolioViewModel[]): number {
@@ -76,21 +98,53 @@ function positionsCost(positions: readonly InvestmentPortfolioViewModel[]): numb
 }
 
 /**
- * Groups open portfolio positions under the brokerage account that funded them
+ * Groups open portfolio positions under the brokerage account(s) that hold them
  * so the investments page can show "how much do I have at Piapiri" per account
- * (cash + positions + total), plus a residual "Bağlanmamış" group.
+ * (cash + positions + total), plus a residual "Bağlanmamış" group. A position
+ * held at more than one custodian is split across them by net units, so the
+ * same fund shows under every account that actually holds it.
  */
 export function summarizeAccountPortfolio(
   portfolio: readonly InvestmentPortfolioViewModel[],
   lots: readonly InvestmentLotViewModel[],
+  sales: readonly InvestmentSaleViewModel[],
   brokerageAccounts: readonly InvestmentBrokerageAccount[],
 ): AccountPortfolioSummary {
   const buckets = new Map<UUID | null, InvestmentPortfolioViewModel[]>();
-  for (const position of portfolio) {
-    const key = dominantAccountId(position.instrumentId, lots);
+  const addToBucket = (key: UUID | null, position: InvestmentPortfolioViewModel) => {
     const bucket = buckets.get(key);
     if (bucket) bucket.push(position);
     else buckets.set(key, [position]);
+  };
+
+  for (const position of portfolio) {
+    const net = netUnitsByAccount(position.instrumentId, lots, sales);
+    // Only real accounts that still hold a positive net can carry the position;
+    // the null (un-linked) key never splits it - a bonus issue belongs wherever
+    // the base shares are.
+    const holders = [...net].filter(
+      (entry): entry is [UUID, number] => entry[0] !== null && entry[1] > 1e-6,
+    );
+    if (holders.length === 0) {
+      addToBucket(null, position);
+      continue;
+    }
+    if (holders.length === 1) {
+      addToBucket(holders[0]![0], position);
+      continue;
+    }
+    // Held across several accounts (the same fund at two custodians): show it
+    // under each, split proportionally to net units. The largest holder is
+    // assigned last and absorbs the rounding remainder so the slices still add
+    // up to the whole position.
+    holders.sort((a, b) => a[1] - b[1]);
+    const totalUnits = holders.reduce((sum, [, units]) => sum + units, 0);
+    let assigned = 0;
+    holders.forEach(([accountId, units], index) => {
+      const fraction = index === holders.length - 1 ? Math.max(0, 1 - assigned) : units / totalUnits;
+      assigned += fraction;
+      addToBucket(accountId, slicePosition(position, fraction));
+    });
   }
 
   const accountGroup = (account: InvestmentBrokerageAccount): AccountPortfolioGroup => {

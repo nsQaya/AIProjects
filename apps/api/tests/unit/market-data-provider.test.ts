@@ -6,6 +6,7 @@ import {
   parseKapEquities,
   parseKapEtfs,
   parseNasdaqCatalog,
+  resolveYahooSymbol,
 } from "../../src/modules/market-data/market-data.provider";
 
 describe("market data provider", () => {
@@ -70,6 +71,32 @@ describe("market data provider", () => {
       providerSymbol:"AAPL",priceDate:"2026-08-14",close:"123.45",adjustedClose:"120",currencyCode:"USD",
     }]);
     expect(result.failedSymbols).toEqual([]);
+  });
+
+  it("resolves a not-yet-cataloged BIST ticker from Yahoo chart meta", async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      if (!String(input).includes("INTET.IS")) return new Response("not found", { status: 404 });
+      return new Response(JSON.stringify({ chart: { result: [{ meta: {
+        currency: "TRY", exchangeName: "IST", instrumentType: "EQUITY", regularMarketPrice: 64.8,
+        firstTradeDate: Date.parse("2026-08-25T07:00:00Z") / 1000,
+        longName: "Intetra Teknoloji Ve Bilisim Hizmetleri Anonim Sirketi",
+      } }] } }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }) as typeof fetch;
+
+    expect(await resolveYahooSymbol("intet", undefined, fetcher)).toEqual({
+      providerSymbol: "INTET.IS",
+      market: "BIST",
+      exchangeCode: "BIST",
+      currencyCode: "TRY",
+      instrumentType: "EQUITY",
+      firstTradeDate: "2026-08-25",
+      name: "Intetra Teknoloji Ve Bilisim Hizmetleri Anonim Sirketi",
+    });
+  });
+
+  it("returns null when Yahoo has no listing for the ticker", async () => {
+    const fetcher = vi.fn(async () => new Response("not found", { status: 404 })) as typeof fetch;
+    expect(await resolveYahooSymbol("zzzz", "BIST", fetcher)).toBeNull();
   });
 
   it("stamps the live intraday quote on targetDate regardless of the bar dates it saw", async () => {

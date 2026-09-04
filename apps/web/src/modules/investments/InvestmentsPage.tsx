@@ -77,7 +77,7 @@ export function InvestmentsPage({
   // costBasisTRY/currentValueTRY are already normalized to TRY (equal to the
   // plain fields for TRY instruments); a foreign-currency instrument with no
   // TCMB rate yet contributes 0 here rather than mixing units into the total.
-  const summary = summarizeAccountPortfolio(portfolio, lots, brokerageAccounts);
+  const summary = summarizeAccountPortfolio(portfolio, lots, sales, brokerageAccounts);
   const cost = summary.positionsCost;
   const value = summary.positionsValue;
   const gain = value - cost;
