@@ -2,7 +2,8 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { AccountTypeDTO } from "@defterx/contracts";
 
-import { AccountsPage, type AccountViewModel } from ".";
+import { AccountsPage, type AccountSharingApi, type AccountViewModel } from ".";
+import type { SharedAccountView } from "../../finance/finance-views";
 
 const bankType: AccountTypeDTO = {
   id: "type-bank",
@@ -58,6 +59,57 @@ function callbacks() {
     onCreateAccount: vi.fn(() => Promise.resolve(undefined)),
     onDeleteAccount: vi.fn(() => Promise.resolve(undefined)),
     onUpdateAccount: vi.fn(() => Promise.resolve(undefined)),
+  };
+}
+
+const sharedOperateAccount: SharedAccountView = {
+  id: "shared-1",
+  bookId: "book-2",
+  contactId: null,
+  name: "Ev Bütçesi",
+  accountTypeId: "type-bank",
+  accountTypeName: "Banka",
+  accountTypeIcon: null,
+  isInvestment: false,
+  normalBalance: "DEBIT",
+  currencyCode: "TRY",
+  allowNegativeBalance: false,
+  creditLimit: null,
+  isArchived: false,
+  sortOrder: 0,
+  version: 1,
+  balance: "800",
+  displayBalance: "800",
+  displayBalanceTry: "800",
+  openingBalance: "0",
+  availableCredit: null,
+  shareId: "share-1",
+  permission: "OPERATE",
+  ownerBookId: "book-2",
+  ownerName: "Eş",
+  ownerEmail: "es@example.com",
+  ui: { balance: 800, displayBalance: 800, displayBalanceTry: 800, creditLimit: null, availableCredit: null },
+};
+
+function sharingApi(accounts: readonly SharedAccountView[]): AccountSharingApi {
+  return {
+    sharedAccounts: accounts,
+    listShares: vi.fn(() => Promise.resolve([])),
+    shareAccount: vi.fn(() => Promise.resolve(undefined)),
+    updateShare: vi.fn(() => Promise.resolve(undefined)),
+    revokeShare: vi.fn(() => Promise.resolve(undefined)),
+    loadSharedTransactions: vi.fn(() => Promise.resolve([])),
+    loadPostingContext: vi.fn(() =>
+      Promise.resolve({
+        accountId: "shared-1",
+        bookId: "book-2",
+        currencyCode: "TRY",
+        baseCurrency: "TRY",
+        categories: [],
+        costCenters: [],
+      }),
+    ),
+    createSharedTransaction: vi.fn(() => Promise.resolve(undefined)),
   };
 }
 
@@ -221,6 +273,39 @@ describe("AccountsPage", () => {
     expect(balance?.textContent).toContain("50,00");
     expect(balance?.textContent).not.toContain("₺");
     expect(within(card as HTMLElement).getByText("≈ ₺1.744,68")).toBeInTheDocument();
+  });
+
+  it("shows shared accounts in their own section and opens the owner share dialog", async () => {
+    const user = userEvent.setup();
+    const actions = callbacks();
+    const sharing = sharingApi([sharedOperateAccount]);
+    render(
+      <AccountsPage
+        accounts={[bankAccount]}
+        accountTypes={accountTypes}
+        sharing={sharing}
+        {...actions}
+      />,
+    );
+
+    expect(screen.getByText("Benimle paylaşılanlar")).toBeInTheDocument();
+    const sharedCard = screen.getByText("Ev Bütçesi").closest(".account-card") as HTMLElement;
+    expect(within(sharedCard).getByText("İşlem yapabilir")).toBeInTheDocument();
+    expect(within(sharedCard).getByRole("button", { name: "İşlem ekle" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Paylaş" }));
+    expect(
+      await screen.findByRole("dialog", { name: /paylaşımı/ }),
+    ).toBeInTheDocument();
+    expect(sharing.listShares).toHaveBeenCalledWith(bankAccount.id);
+  });
+
+  it("hides the shared section and the Paylaş action when sharing is not wired", () => {
+    const actions = callbacks();
+    render(<AccountsPage accounts={[bankAccount]} accountTypes={accountTypes} {...actions} />);
+
+    expect(screen.queryByText("Benimle paylaşılanlar")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Paylaş" })).not.toBeInTheDocument();
   });
 
   it("offers enabled currencies on create and submits the chosen one", async () => {

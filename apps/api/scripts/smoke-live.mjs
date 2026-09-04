@@ -193,6 +193,36 @@ if(Number(carriedLedger.openingBalance)!==874.5||carriedLedger.items.length!==0)
 const noAccountLedger=(await request(`/api/v1/transactions?bookId=${book.id}&accountIds=none&limit=1000`,{headers:authorization})).payload;
 if(noAccountLedger.items.length||Number(noAccountLedger.openingBalance)!==0)throw new Error("Empty multi-account transaction filter failed");
 
+// Account sharing: a second user gets VIEW then OPERATE on user A's bank account.
+const granteeEmail=`smoke-grantee+${runId}@defterx.invalid`;
+const granteeRegistration=await request("/api/v1/auth/register",{method:"POST",body:JSON.stringify({email:granteeEmail,password:randomBytes(32).toString("base64url"),displayName:"Smoke Grantee"})});
+const granteeAuth={Authorization:`Bearer ${granteeRegistration.payload.accessToken}`};
+const accountShare=(await request(`/api/v1/accounts/${account.id}/shares`,{method:"POST",headers:authorization,body:JSON.stringify({email:granteeEmail,permission:"VIEW"})})).payload;
+if(accountShare.permission!=="VIEW"||accountShare.granteeEmail.toLowerCase()!==granteeEmail.toLowerCase())throw new Error(`Account share projection failed: ${JSON.stringify(accountShare)}`);
+let sharedWithGrantee=(await request(`/api/v1/accounts/shared-with-me?_=${Date.now()}`,{headers:granteeAuth})).payload;
+if(!sharedWithGrantee.items.some((item)=>item.id===account.id&&item.permission==="VIEW"&&item.ownerBookId===book.id&&Number(item.displayBalance)===874.5))throw new Error(`Shared account did not surface to the grantee: ${JSON.stringify(sharedWithGrantee.items)}`);
+if((await request("/api/v1/accounts/shared-with-me",{headers:authorization})).payload.items.length!==0)throw new Error("Owner should not see their own account as shared-with-me");
+if(!Array.isArray((await request(`/api/v1/transactions?bookId=${book.id}&accountIds=${account.id}`,{headers:granteeAuth})).payload.items))throw new Error("VIEW grantee could not read the shared account ledger");
+const blockedGranteePost=await fetch(`${apiBaseUrl}/api/v1/transactions`,{method:"POST",headers:{Origin:webOrigin,"Content-Type":"application/json",Authorization:granteeAuth.Authorization,"Idempotency-Key":randomUUID()},body:JSON.stringify({bookId:book.id,type:"EXPENSE",title:"Blocked grantee expense",amount:"5",currencyCode:"TRY",accountId:account.id,categoryId:category.id,transactionDate:"2026-08-07T12:00:00.000Z",clientOperationId:randomUUID()})});
+if(blockedGranteePost.status!==403)throw new Error(`VIEW grantee expense should be 403, received ${blockedGranteePost.status}`);
+const upgradedShare=(await request(`/api/v1/accounts/${account.id}/shares/${accountShare.id}`,{method:"PATCH",headers:authorization,body:JSON.stringify({permission:"OPERATE",version:accountShare.version})})).payload;
+if(upgradedShare.permission!=="OPERATE")throw new Error("Account share permission upgrade failed");
+const granteePostingContext=(await request(`/api/v1/accounts/${account.id}/posting-context`,{headers:granteeAuth})).payload;
+if(granteePostingContext.bookId!==book.id||!granteePostingContext.categories.some((item)=>item.id===category.id))throw new Error("Posting context did not expose the owner-book categories");
+const granteeExpense=(await request("/api/v1/transactions",{method:"POST",headers:{...granteeAuth,"Idempotency-Key":randomUUID()},body:JSON.stringify({bookId:book.id,type:"EXPENSE",title:"Grantee expense",amount:"20",currencyCode:"TRY",accountId:account.id,categoryId:category.id,transactionDate:"2026-08-07T12:00:00.000Z",clientOperationId:randomUUID()})})).payload;
+const balanceAfterGranteeExpense=(await request(`/api/v1/accounts/${account.id}/balance`,{headers:authorization})).payload;
+if(Number(balanceAfterGranteeExpense.balance)!==854.5)throw new Error(`Grantee expense did not debit the owner account: ${balanceAfterGranteeExpense.balance}`);
+const blockedGranteeTransfer=await fetch(`${apiBaseUrl}/api/v1/transactions`,{method:"POST",headers:{Origin:webOrigin,"Content-Type":"application/json",Authorization:granteeAuth.Authorization,"Idempotency-Key":randomUUID()},body:JSON.stringify({bookId:book.id,type:"TRANSFER",title:"Blocked grantee transfer",amount:"1",currencyCode:"TRY",accountId:account.id,targetAccountId:restrictedAccount.id,transactionDate:"2026-08-07T12:00:00.000Z",clientOperationId:randomUUID()})});
+if(blockedGranteeTransfer.status!==403)throw new Error(`Grantee transfer should be 403, received ${blockedGranteeTransfer.status}`);
+await request(`/api/v1/transactions/${granteeExpense.id}/reverse?bookId=${book.id}`,{method:"POST",headers:{...granteeAuth,"Idempotency-Key":randomUUID()},body:JSON.stringify({clientOperationId:randomUUID(),reason:"Grantee reversal smoke"})});
+if(Number((await request(`/api/v1/accounts/${account.id}/balance`,{headers:authorization})).payload.balance)!==874.5)throw new Error("Grantee could not reverse their own posting");
+const revokedShare=(await request(`/api/v1/accounts/${account.id}/shares/${accountShare.id}`,{method:"DELETE",headers:authorization})).payload;
+if(revokedShare.status!=="REVOKED")throw new Error("Account share revoke failed");
+sharedWithGrantee=(await request(`/api/v1/accounts/shared-with-me?_=${Date.now()}`,{headers:granteeAuth})).payload;
+if(sharedWithGrantee.items.some((item)=>item.id===account.id))throw new Error("Revoked share is still visible to the grantee");
+const deniedAfterRevoke=await fetch(`${apiBaseUrl}/api/v1/accounts/${account.id}/balance`,{headers:{Origin:webOrigin,Authorization:granteeAuth.Authorization}});
+if(deniedAfterRevoke.status!==403)throw new Error(`Revoked grantee balance read should be 403, received ${deniedAfterRevoke.status}`);
+
 const investmentType=accountTypes.items.find((item)=>item.name==="Birikim");
 if(!investmentType)throw new Error("Seeded Birikim investment account type was not found");
 const brokerage=(await request("/api/v1/accounts",{method:"POST",headers:authorization,body:JSON.stringify({bookId:book.id,name:"Smoke Piapiri",accountTypeId:investmentType.id,currencyCode:"TRY",openingBalance:"0"})})).payload;
@@ -285,6 +315,7 @@ console.log(JSON.stringify({
   investmentSale: "passed",
   investmentSaleUpdate: "passed",
   investmentSaleDelete: "passed",
+  accountSharing: "passed",
   inactiveCategoryHistory: "passed",
   inactiveCostCenterHistory: "passed",
   refreshRotation: Boolean(rotated.payload.refreshToken),

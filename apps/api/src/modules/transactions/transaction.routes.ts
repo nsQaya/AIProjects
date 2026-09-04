@@ -1,8 +1,10 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../../config/bindings";
 import { parseJson } from "../../common/validation";
-import { requireBookRole } from "../../middleware/book-access";
+import { getBookRole, hasBookRole } from "../../middleware/book-access";
+import { assertAccountAccess, hasAccountLevel, resolveAccountAccess } from "../../middleware/account-access";
 import { AppError } from "../../common/errors";
+import type { DbClient } from "../../infrastructure/database";
 import { correctionSchema, reversalSchema, transactionMutationSchema } from "./transaction.schemas";
 import { correctTransaction, createTransaction, reverseTransaction } from "./transaction.service";
 
@@ -10,17 +12,28 @@ export const transactionRoutes = new Hono<AppEnv>();
 
 transactionRoutes.get("/",async (c) => {
   const pool = c.get("database");
+  const userId = c.get("user").id;
   const bookId = c.req.query("bookId") ?? "";
-  await requireBookRole(pool,bookId,c.get("user").id,"VIEWER");
   const parsedLimit = Number(c.req.query("limit") ?? 100);
   const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit,1),1000) : 100;
   const cursor = c.req.query("cursor") ?? null;
   const rawAccountIds=c.req.query("accountIds");
   const legacyAccountId=c.req.query("accountId");
-  const includeAllAccounts=rawAccountIds===undefined&&!legacyAccountId;
+  let includeAllAccounts=rawAccountIds===undefined&&!legacyAccountId;
   const accountIds=includeAllAccounts||rawAccountIds==="none"?[]:(rawAccountIds?.split(",").filter(Boolean)??[legacyAccountId!]);
   const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   if(accountIds.length>200||accountIds.some(id=>!uuid.test(id)))throw new AppError(422,"INVALID_ACCOUNT_FILTER","Account filter contains an invalid identifier");
+  // Book members read normally. A grantee with no book role may still read a
+  // specific shared account's ledger: the filter must name accounts, and every
+  // one must be VIEW+ shared with them in this book.
+  if(!(await getBookRole(pool,bookId,userId))){
+    if(!accountIds.length)throw new AppError(403,"BOOK_ACCESS_DENIED","You do not have access to this book");
+    for(const id of accountIds){
+      const access=await resolveAccountAccess(pool,id,userId);
+      if(access.bookId!==bookId||!hasAccountLevel(access,"VIEW"))throw new AppError(403,"ACCOUNT_ACCESS_DENIED","You do not have access to this account");
+    }
+    includeAllAccounts=false;
+  }
   const categoryId = c.req.query("categoryId") ?? null;
   const costCenterId = c.req.query("costCenterId") ?? null;
   if(costCenterId&&!uuid.test(costCenterId))throw new AppError(422,"INVALID_COST_CENTER_FILTER","Cost center filter contains an invalid identifier");
@@ -85,26 +98,65 @@ transactionRoutes.get("/",async (c) => {
 transactionRoutes.post("/",async (c) => {
   const input = await parseJson(c.req.raw,transactionMutationSchema);
   const pool = c.get("database");
-  await requireBookRole(pool,input.bookId,c.get("user").id,"EDITOR");
+  const userId = c.get("user").id;
+  if (!hasBookRole(await getBookRole(pool,input.bookId,userId),"EDITOR")) {
+    // OPERATE-share fallback: a plain income/expense posting against one shared account.
+    if ((input.type !== "INCOME" && input.type !== "EXPENSE") || input.targetAccountId) {
+      throw new AppError(403,"INSUFFICIENT_ROLE","This action requires EDITOR access");
+    }
+    const access = await assertAccountAccess(pool,input.accountId,userId,"OPERATE");
+    if (access.bookId !== input.bookId) throw new AppError(422,"BOOK_MISMATCH","Account belongs to another book");
+  }
   const key = c.req.header("Idempotency-Key");
   if (!key) throw new AppError(422,"IDEMPOTENCY_KEY_REQUIRED","Idempotency-Key header is required");
-  return c.json(await createTransaction(pool,c.get("user").id,input,key),201);
+  return c.json(await createTransaction(pool,userId,input,key),201);
 });
 
 transactionRoutes.post("/:transactionId/reverse",async (c) => {
   const input = await parseJson(c.req.raw,reversalSchema);
   const pool = c.get("database");
+  const userId = c.get("user").id;
   const bookId = c.req.query("bookId") ?? "";
-  await requireBookRole(pool,bookId,c.get("user").id,"EDITOR");
+  await assertReversalAccess(pool,bookId,userId,c.req.param("transactionId"));
   if (!c.req.header("Idempotency-Key")) throw new AppError(422,"IDEMPOTENCY_KEY_REQUIRED","Idempotency-Key header is required");
-  return c.json(await reverseTransaction(pool,c.get("user").id,bookId,c.req.param("transactionId"),input.clientOperationId,input.reason),201);
+  return c.json(await reverseTransaction(pool,userId,bookId,c.req.param("transactionId"),input.clientOperationId,input.reason),201);
 });
 
 transactionRoutes.post("/:transactionId/correct",async (c) => {
   const input = await parseJson(c.req.raw,correctionSchema);
   const pool = c.get("database");
+  const userId = c.get("user").id;
   const bookId = c.req.query("bookId") ?? "";
-  await requireBookRole(pool,bookId,c.get("user").id,"EDITOR");
+  if (!hasBookRole(await getBookRole(pool,bookId,userId),"EDITOR")
+      && ((input.replacement.type !== "INCOME" && input.replacement.type !== "EXPENSE") || input.replacement.targetAccountId)) {
+    throw new AppError(403,"INSUFFICIENT_ROLE","This action requires EDITOR access");
+  }
+  await assertReversalAccess(pool,bookId,userId,c.req.param("transactionId"),input.replacement.accountId);
   if (!c.req.header("Idempotency-Key")) throw new AppError(422,"IDEMPOTENCY_KEY_REQUIRED","Idempotency-Key header is required");
-  return c.json(await correctTransaction(pool,c.get("user").id,bookId,c.req.param("transactionId"),input.reversalClientOperationId,input.reason,input.replacement),201);
+  return c.json(await correctTransaction(pool,userId,bookId,c.req.param("transactionId"),input.reversalClientOperationId,input.reason,input.replacement),201);
 });
+
+/**
+ * Book EDITOR+ may reverse/correct anything. A grantee may only touch a transaction
+ * they created themselves, and only when every account it (or its replacement) posts
+ * to is OPERATE-shared with them.
+ */
+async function assertReversalAccess(
+  pool: DbClient,
+  bookId: string,
+  userId: string,
+  transactionId: string,
+  replacementAccountId?: string,
+) {
+  if (hasBookRole(await getBookRole(pool,bookId,userId),"EDITOR")) return;
+  const original = await pool.query<{ created_by: string; account_id: string; target_account_id: string | null }>(
+    `SELECT created_by,account_id,target_account_id FROM transactions
+     WHERE id=$1 AND book_id=$2 AND deleted_at IS NULL`,
+    [transactionId,bookId],
+  );
+  const row = original.rows[0];
+  if (!row) throw new AppError(404,"TRANSACTION_NOT_FOUND","Transaction was not found");
+  if (row.created_by !== userId) throw new AppError(403,"INSUFFICIENT_ROLE","This action requires EDITOR access");
+  const ids = new Set([row.account_id, row.target_account_id, replacementAccountId].filter(Boolean) as string[]);
+  for (const id of ids) await assertAccountAccess(pool,id,userId,"OPERATE");
+}

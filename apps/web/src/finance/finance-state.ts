@@ -25,6 +25,7 @@ import type {
   InvestmentPortfolioItemView,
   InvestmentSaleView,
   ScheduledTransactionView,
+  SharedAccountView,
   TransactionView,
 } from "./finance-views";
 
@@ -66,6 +67,8 @@ export interface FinanceSnapshot {
   user: AuthUser | null;
   book: BookListItemDTO | null;
   accounts: readonly AccountView[];
+  /** Accounts other users have shared with the signed-in user. Kept out of dashboard/report/net-worth totals. */
+  sharedAccounts: readonly SharedAccountView[];
   accountTypes: readonly AccountTypeDTO[];
   categories: readonly (CategoryDTO & { ui: { kind: "income" | "expense" } })[];
   costCenters: readonly CostCenterDTO[];
@@ -117,6 +120,7 @@ export function createInitialFinanceSnapshot(): FinanceSnapshot {
     user: null,
     book: null,
     accounts: [],
+    sharedAccounts: [],
     accountTypes: [],
     categories: [],
     costCenters: [],

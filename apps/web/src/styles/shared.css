@@ -537,3 +537,89 @@
   .report-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .report-net-worth-grid { grid-template-columns: 1fr; }
 }
+
+/* --- Account sharing --- */
+
+.muted {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.account-card .badge {
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--green-soft);
+  color: var(--forest-700);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.shared-accounts .section-intro {
+  background: #33415f;
+}
+
+.account-share-list {
+  margin: 6px 0 14px;
+}
+
+.account-share-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.account-share-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.account-share-row > div {
+  flex: 1;
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.account-share-row small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.account-share-row select {
+  min-height: 32px;
+}
+
+.account-share-invite {
+  display: grid;
+  gap: 10px;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.data-table th,
+.data-table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.data-table th.numeric,
+.data-table td.numeric {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.data-table td small {
+  color: var(--muted);
+}

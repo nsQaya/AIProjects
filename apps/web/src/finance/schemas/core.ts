@@ -89,6 +89,34 @@ export const deleteAccountResponseSchema = z.union([
   }),
 ]);
 
+export const accountSharePermissionSchema = z.enum(["VIEW", "OPERATE"]);
+
+export const sharedWithMeAccountSchema = accountSchema.extend({
+  shareId: uuidSchema,
+  permission: accountSharePermissionSchema,
+  ownerBookId: uuidSchema,
+  ownerName: z.string(),
+  ownerEmail: z.string(),
+});
+export const sharedWithMeListSchema = itemListSchema(sharedWithMeAccountSchema);
+
+export const accountShareSchema = z.object({
+  id: uuidSchema,
+  accountId: uuidSchema,
+  granteeUserId: uuidSchema,
+  granteeEmail: z.string(),
+  granteeDisplayName: z.string(),
+  permission: accountSharePermissionSchema,
+  status: z.enum(["ACTIVE", "REVOKED"]),
+  version: versionSchema,
+});
+export const accountShareListSchema = itemListSchema(accountShareSchema);
+export const revokedAccountShareSchema = z.object({
+  id: uuidSchema,
+  status: z.literal("REVOKED"),
+  version: versionSchema,
+});
+
 export const categoryTypeSchema = z.enum(["INCOME", "EXPENSE"]);
 
 export const categorySchema = z.object({
@@ -125,6 +153,15 @@ export const deleteCostCenterResponseSchema = z.union([
   deletedEntitySchema,
   deactivatedEntitySchema,
 ]);
+
+export const accountPostingContextSchema = z.object({
+  accountId: uuidSchema,
+  bookId: uuidSchema,
+  currencyCode: currencyCodeSchema,
+  baseCurrency: currencyCodeSchema,
+  categories: z.array(categorySchema),
+  costCenters: z.array(costCenterSchema),
+});
 
 export const transactionTypeSchema = z.enum([
   "INCOME",

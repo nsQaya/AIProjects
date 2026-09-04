@@ -69,6 +69,7 @@ function defaultResponse(path: string, options: RequestOptions<unknown>): unknow
       ],
     };
   }
+  if (path.startsWith("/api/v1/accounts/shared-with-me")) return { items: [] };
   if (path.startsWith("/api/v1/accounts?")) return { items: [] };
   if (path.startsWith("/api/v1/account-types?")) return { items: [] };
   if (path.startsWith("/api/v1/categories?")) return { items: [] };
@@ -214,6 +215,90 @@ describe("FinanceService transaction boundaries", () => {
       reportAnalytics: null,
       reportLoadFailed: true,
     });
+  });
+
+  it("loads accounts shared with the user into the snapshot without touching own totals", async () => {
+    const api = new MockFinanceAPI();
+    api.handler = (path, options) => {
+      if (path.startsWith("/api/v1/accounts/shared-with-me")) {
+        return {
+          items: [
+            {
+              id: "20000000-0000-4000-8000-000000000001",
+              bookId: "20000000-0000-4000-8000-0000000000bb",
+              contactId: null,
+              name: "Ortak Banka",
+              accountTypeId: "20000000-0000-4000-8000-0000000000cc",
+              accountTypeName: "Banka",
+              accountTypeIcon: null,
+              isInvestment: false,
+              normalBalance: "DEBIT",
+              currencyCode: "TRY",
+              allowNegativeBalance: false,
+              creditLimit: null,
+              isArchived: false,
+              sortOrder: 0,
+              version: 1,
+              balance: "1000",
+              displayBalance: "1000",
+              displayBalanceTry: "1000",
+              openingBalance: "0",
+              availableCredit: null,
+              shareId: "20000000-0000-4000-8000-0000000000aa",
+              permission: "OPERATE",
+              ownerBookId: "20000000-0000-4000-8000-0000000000bb",
+              ownerName: "Sahip",
+              ownerEmail: "sahip@example.com",
+            },
+          ],
+        };
+      }
+      return defaultResponse(path, options);
+    };
+    const service = new FinanceService(api, {
+      now: () => new Date("2026-08-07T12:00:00.000Z"),
+      randomUUID: () => "10000000-0000-4000-8000-000000000001",
+      sleep: () => Promise.resolve(),
+    });
+
+    await service.initialize();
+
+    const snapshot = service.getSnapshot();
+    expect(snapshot.sharedAccounts).toHaveLength(1);
+    expect(snapshot.sharedAccounts[0]).toMatchObject({
+      permission: "OPERATE",
+      ownerBookId: "20000000-0000-4000-8000-0000000000bb",
+      ui: { displayBalance: 1000 },
+    });
+    expect(snapshot.accounts).toHaveLength(0);
+  });
+
+  it("posts a shared-account transaction into the owner's book", async () => {
+    const { api, service } = await initializedService();
+    const ownerBookId = "20000000-0000-4000-8000-0000000000bb";
+    api.handler = (path, options) => {
+      if (path === "/api/v1/transactions" && options.method === "POST") {
+        return { id: TRANSACTION_ONE_ID, type: "EXPENSE", title: "Market", status: "POSTED", currencyCode: "TRY", version: 1 };
+      }
+      return defaultResponse(path, options);
+    };
+
+    await service.createSharedAccountTransaction(ownerBookId, {
+      type: "EXPENSE",
+      title: "Market",
+      amount: "50",
+      accountId: "20000000-0000-4000-8000-000000000001",
+      currencyCode: "TRY",
+      categoryId: "20000000-0000-4000-8000-0000000000dd",
+      transactionDate: "2026-08-07T12:00:00.000Z",
+    });
+
+    const request = api.calls.find(
+      (call) => call.path === "/api/v1/transactions" && call.method === "POST",
+    );
+    expect(request).toBeDefined();
+    expect(request!.body).toMatchObject({ bookId: ownerBookId, accountId: "20000000-0000-4000-8000-000000000001" });
+    expect(request!.idempotencyKey).toBeDefined();
   });
 
   it("serializes an empty account selection as accountIds=none", async () => {

@@ -9,6 +9,7 @@ import type {
   InvestmentPortfolioItemDTO,
   InvestmentSaleDTO,
   ScheduledTransactionDTO,
+  SharedWithMeAccountDTO,
   TransactionListItemDTO,
 } from "@defterx/contracts";
 import { cashFlowLabel, isoDay } from "./finance-query";
@@ -17,6 +18,16 @@ export interface AccountView extends AccountDTO {
   ui: {
     balance: number;
     displayBalance: number;
+    creditLimit: number | null;
+    availableCredit: number | null;
+  };
+}
+
+export interface SharedAccountView extends SharedWithMeAccountDTO {
+  ui: {
+    balance: number;
+    displayBalance: number;
+    displayBalanceTry: number;
     creditLimit: number | null;
     availableCredit: number | null;
   };
@@ -138,6 +149,19 @@ export function accountView(account: AccountDTO): AccountView {
     ui: {
       balance: toUiNumber(account.balance),
       displayBalance: toUiNumber(account.displayBalance),
+      creditLimit: toOptionalUiNumber(account.creditLimit),
+      availableCredit: toOptionalUiNumber(account.availableCredit),
+    },
+  };
+}
+
+export function sharedAccountView(account: SharedWithMeAccountDTO): SharedAccountView {
+  return {
+    ...account,
+    ui: {
+      balance: toUiNumber(account.balance),
+      displayBalance: toUiNumber(account.displayBalance),
+      displayBalanceTry: toUiNumber(account.displayBalanceTry),
       creditLimit: toOptionalUiNumber(account.creditLimit),
       availableCredit: toOptionalUiNumber(account.availableCredit),
     },

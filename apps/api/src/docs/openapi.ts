@@ -68,6 +68,16 @@ paths:
   /accounts:
     get: { summary: List accounts, responses: { '200': { description: Accounts } } }
     post: { summary: Create account, responses: { '201': { description: Created } } }
+  /accounts/shared-with-me:
+    get: { summary: Accounts other users have shared with the caller, with balances, permission and owner, responses: { '200': { description: Shared accounts } } }
+  /accounts/{accountId}/shares:
+    get: { summary: List the grantees an account is shared with, parameters: [{ name: accountId, in: path, required: true, schema: { type: string, format: uuid } }], responses: { '200': { description: Shares }, '403': { description: Requires account owner } } }
+    post: { summary: Share an account with a user by email (permission VIEW or OPERATE), parameters: [{ name: accountId, in: path, required: true, schema: { type: string, format: uuid } }], responses: { '201': { description: Shared }, '404': { description: No active user with that email }, '422': { description: Account not shareable } } }
+  /accounts/{accountId}/shares/{shareId}:
+    patch: { summary: Change a share's permission, parameters: [{ name: accountId, in: path, required: true, schema: { type: string, format: uuid } }, { name: shareId, in: path, required: true, schema: { type: string, format: uuid } }], responses: { '200': { description: Updated } } }
+    delete: { summary: Revoke a share, parameters: [{ name: accountId, in: path, required: true, schema: { type: string, format: uuid } }, { name: shareId, in: path, required: true, schema: { type: string, format: uuid } }], responses: { '200': { description: Revoked } } }
+  /accounts/{accountId}/posting-context:
+    get: { summary: Owner-book categories and cost centers a grantee needs to post an OPERATE transaction against the shared account, parameters: [{ name: accountId, in: path, required: true, schema: { type: string, format: uuid } }], responses: { '200': { description: Posting context }, '403': { description: Requires OPERATE share } } }
   /categories:
     get: { summary: List categories, responses: { '200': { description: Categories } } }
     post: { summary: Create category and hidden ledger account, responses: { '201': { description: Created } } }

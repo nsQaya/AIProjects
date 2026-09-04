@@ -49,6 +49,7 @@ app.get("/health/ready", async (c) => {
         AND to_regclass('public.investment_lots') IS NOT NULL
         AND to_regclass('public.market_symbols') IS NOT NULL
         AND to_regclass('public.market_daily_prices') IS NOT NULL
+        AND to_regclass('public.account_shares') IS NOT NULL
         AND to_regclass('public.currency_daily_rates') IS NOT NULL AS schema_ready,
       has_table_privilege(current_user,'public.users','SELECT,INSERT')
         AND has_table_privilege(current_user,'public.transactions','SELECT,INSERT,UPDATE,DELETE')
@@ -60,7 +61,7 @@ app.get("/health/ready", async (c) => {
         AND has_table_privilege(current_user,'public.currency_daily_rates','SELECT,INSERT,UPDATE,DELETE') AS tables_ready,
       has_sequence_privilege(current_user,'public.transaction_number_seq','USAGE') AS sequence_ready`));
     const checks = result.rows[0]!;
-    const expectedMigrations = 24;
+    const expectedMigrations = 25;
     const ready = checks.migration_count === expectedMigrations && checks.schema_ready && checks.tables_ready
       && checks.sequence_ready && secretBytes >= 32 && pepperBytes >= 32 && passwordResetPepperBytes >= 32;
     return c.json({ status: ready ? "ready" : "not_ready", checks: {

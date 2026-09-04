@@ -6,7 +6,7 @@ import { reverseWithClient } from "../transactions/transaction.service";
 import { resolveSystemEquityAccountId } from "./system-accounts";
 import type { CreateAccountInput, UpdateAccountInput } from "./account.schemas";
 
-const accountProjection = `
+export const accountProjection = `
   a.id,a.book_id AS "bookId",a.contact_id AS "contactId",a.name,
   a.account_type_id AS "accountTypeId",at.name AS "accountTypeName",at.icon AS "accountTypeIcon",
   at.is_investment AS "isInvestment",
@@ -35,11 +35,11 @@ const accountProjection = `
     ORDER BY t.transaction_date DESC,t.transaction_no DESC LIMIT 1
   ),0)::text AS "openingBalance"`;
 
-const typeJoin = `JOIN account_types at ON at.id=a.account_type_id`;
+export const typeJoin = `JOIN account_types at ON at.id=a.account_type_id`;
 
 // Latest TCMB rate for the account's currency; only joined for non-TRY accounts
 // so displayBalanceTry can express a foreign balance in the book base currency.
-const fxRateJoin = `
+export const fxRateJoin = `
   LEFT JOIN LATERAL (
     SELECT try_rate FROM currency_daily_rates
     WHERE currency_code=a.currency_code ORDER BY rate_date DESC LIMIT 1
@@ -49,7 +49,7 @@ const fxRateJoin = `
 // book-base-currency (base_amount) figure is only used for cross-currency
 // rollups. amount == base_amount for every single-currency transaction, so this
 // is unchanged for TRY-only books.
-const balanceJoin = `
+export const balanceJoin = `
   LEFT JOIN LATERAL (
     SELECT CASE WHEN a.normal_balance='DEBIT'
       THEN COALESCE(SUM(CASE WHEN e.direction='DEBIT' THEN e.amount ELSE -e.amount END),0)
@@ -304,6 +304,13 @@ export async function deleteOrArchiveAccount(client: DbClient, userId: string, a
           [accountId,version],
         );
     if (!result.rows[0]) throw new AppError(409, "VERSION_CONFLICT", "Account changed on another device");
+    if (!used.rowCount) {
+      await transaction.query(
+        `UPDATE account_shares SET status='REVOKED',deleted_at=now(),updated_at=now(),version=version+1
+         WHERE account_id=$1 AND deleted_at IS NULL`,
+        [accountId],
+      );
+    }
     await transaction.query(
       `INSERT INTO audit_logs(book_id,actor_user_id,entity_type,entity_id,action,new_values)
        VALUES($1,$2,'ACCOUNT',$3,$4,$5)`,

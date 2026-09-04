@@ -2,6 +2,7 @@ export type * from "./common.js";
 export type * from "./auth.js";
 export type * from "./books.js";
 export type * from "./accounts.js";
+export type * from "./account-shares.js";
 export type * from "./categories.js";
 export type * from "./cost-centers.js";
 export type * from "./transactions.js";

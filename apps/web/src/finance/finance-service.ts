@@ -1,4 +1,7 @@
 import type {
+  AccountPostingContextDTO,
+  AccountShareListResponse,
+  AccountSharePermission,
   BalanceReportResponse,
   BookListItemDTO,
   CorrectTransactionResponse,
@@ -49,7 +52,9 @@ import type {
   RealizeScheduledTransactionResponse,
   ReceivablePayableReportResponse,
   ReportAnalyticsResponse,
+  RevokedAccountShareResponse,
   ReverseTransactionResponse,
+  ShareAccountResponse,
   SetInvestmentPriceRequest,
   SetScheduledStatusRequest,
   SetScheduledStatusResponse,
@@ -57,6 +62,7 @@ import type {
   UUID,
   UpdateAccountRequest,
   UpdateAccountResponse,
+  UpdateAccountShareResponse,
   UpdateAccountTypeRequest,
   UpdateAccountTypeResponse,
   UpdateCategoryRequest,
@@ -105,6 +111,7 @@ import {
   investmentPortfolioItemView,
   investmentSaleView,
   scheduledTransactionView,
+  sharedAccountView,
   toUiNumber,
   transactionView,
   type CashFlowView,
@@ -112,7 +119,10 @@ import {
 } from "./finance-views";
 import {
   accountListSchema,
+  accountPostingContextSchema,
   accountSchema,
+  accountShareListSchema,
+  accountShareSchema,
   accountTypeListSchema,
   accountTypeSchema,
   bookListSchema,
@@ -121,6 +131,8 @@ import {
   costCenterListSchema,
   costCenterSchema,
   correctTransactionResponseSchema,
+  revokedAccountShareSchema,
+  sharedWithMeListSchema,
   createScheduledTransactionResponseSchema,
   createdBookSchema,
   deleteAccountResponseSchema,
@@ -403,6 +415,7 @@ export class FinanceService {
         currenciesResponse,
         transactionsResponse,
         scheduledResponse,
+        sharedAccountsResponse,
       ] =
         await Promise.all([
           this.#api.request(`/api/v1/accounts?${baseQuery}&includeArchived=true`, {
@@ -426,11 +439,15 @@ export class FinanceService {
           this.#api.request(`/api/v1/scheduled-transactions?${baseQuery}&view=all`, {
             schema: scheduledTransactionListSchema,
           }),
+          this.#api.request(`/api/v1/accounts/shared-with-me?_=${revision}`, {
+            schema: sharedWithMeListSchema,
+          }),
         ]);
 
       if (refreshSequence !== this.#refreshSequence) return this.#state;
 
       const accounts = accountsResponse.items.map(accountView);
+      const sharedAccounts = sharedAccountsResponse.items.map(sharedAccountView);
       const categories = categoriesResponse.items.map((category) => ({
         ...category,
         ui: { kind: category.categoryType.toLowerCase() as "income" | "expense" },
@@ -507,6 +524,7 @@ export class FinanceService {
         revision: state.revision + 1,
         lastUpdatedAt: this.#now().toISOString(),
         accounts,
+        sharedAccounts,
         accountTypes: accountTypesResponse.items,
         categories,
         costCenters,
@@ -809,6 +827,86 @@ export class FinanceService {
     return this.#api.request(`/api/v1/accounts/${id}?${buildQuery({ version })}`, {
       method: "DELETE",
       schema: deleteAccountResponseSchema,
+    });
+  }
+
+  // --- Account sharing ---
+
+  listAccountShares(accountId: UUID): Promise<AccountShareListResponse> {
+    return this.#api.request(`/api/v1/accounts/${accountId}/shares`, {
+      schema: accountShareListSchema,
+    });
+  }
+
+  shareAccount(
+    accountId: UUID,
+    input: { email: string; permission: AccountSharePermission },
+  ): Promise<ShareAccountResponse> {
+    return this.#api.request(`/api/v1/accounts/${accountId}/shares`, {
+      method: "POST",
+      body: input,
+      schema: accountShareSchema,
+    });
+  }
+
+  updateAccountShare(
+    accountId: UUID,
+    shareId: UUID,
+    input: { permission: AccountSharePermission; version: number },
+  ): Promise<UpdateAccountShareResponse> {
+    return this.#api.request(`/api/v1/accounts/${accountId}/shares/${shareId}`, {
+      method: "PATCH",
+      body: input,
+      schema: accountShareSchema,
+    });
+  }
+
+  revokeAccountShare(accountId: UUID, shareId: UUID): Promise<RevokedAccountShareResponse> {
+    return this.#api.request(`/api/v1/accounts/${accountId}/shares/${shareId}`, {
+      method: "DELETE",
+      schema: revokedAccountShareSchema,
+    });
+  }
+
+  loadAccountPostingContext(accountId: UUID): Promise<AccountPostingContextDTO> {
+    return this.#api.request(
+      `/api/v1/accounts/${accountId}/posting-context?_=${this.#now().getTime()}`,
+      { schema: accountPostingContextSchema },
+    );
+  }
+
+  /** Ledger of a shared account, read from the owner's book. */
+  async loadSharedAccountTransactions(
+    accountId: UUID,
+    ownerBookId: UUID,
+  ): Promise<readonly TransactionView[]> {
+    const response = await this.#api.request(
+      `/api/v1/transactions?${buildQuery({
+        bookId: ownerBookId,
+        accountIds: accountId,
+        limit: 200,
+        _: this.#now().getTime(),
+      })}`,
+      { schema: transactionListSchema },
+    );
+    return response.items.map(transactionView);
+  }
+
+  /**
+   * Posts an income/expense against a shared account. The transaction is written
+   * to the owner's book (`ownerBookId`) with a category from that book.
+   */
+  createSharedAccountTransaction(
+    ownerBookId: UUID,
+    input: Omit<CreateTransactionRequest, "bookId" | "currencyCode" | "clientOperationId"> & {
+      currencyCode: string;
+    },
+  ): Promise<CreateTransactionResponse> {
+    return this.#api.request("/api/v1/transactions", {
+      method: "POST",
+      idempotencyKey: this.#randomUUID(),
+      body: { bookId: ownerBookId, clientOperationId: this.#randomUUID(), ...input },
+      schema: transactionMutationResultSchema,
     });
   }
 
