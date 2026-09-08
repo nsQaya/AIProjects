@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type {
   AccountTypeDTO,
   CategoryDTO,
@@ -47,6 +47,57 @@ export interface SettingsPageProps {
 
 function defaultConfirmAction(message: string): boolean {
   return globalThis.confirm(message);
+}
+
+function readGroupState(id: string): boolean | null {
+  try {
+    const raw = globalThis.localStorage?.getItem(`defterx:settings-group:${id}`);
+    return raw == null ? null : raw === "1";
+  } catch {
+    return null;
+  }
+}
+
+function writeGroupState(id: string, open: boolean): void {
+  try {
+    globalThis.localStorage?.setItem(`defterx:settings-group:${id}`, open ? "1" : "0");
+  } catch {
+    // storage unavailable — the group just won't remember its state
+  }
+}
+
+function SettingsGroup({
+  id,
+  title,
+  defaultOpen = false,
+  children,
+}: {
+  id: string;
+  title: string;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(() => readGroupState(id) ?? defaultOpen);
+
+  return (
+    <details
+      className="settings-group"
+      open={open}
+      onToggle={(event) => {
+        const next = event.currentTarget.open;
+        setOpen(next);
+        writeGroupState(id, next);
+      }}
+    >
+      <summary>
+        <h2>{title}</h2>
+        <span className="settings-group-chevron" aria-hidden="true">
+          ⌄
+        </span>
+      </summary>
+      <div className="settings-group-body">{children}</div>
+    </details>
+  );
 }
 
 function actionErrorMessage(error: unknown): string {
@@ -168,6 +219,7 @@ export function SettingsPage({
 
   return (
     <section className="page-section settings-stack">
+      <SettingsGroup id="durum" title="Hesap ve güvenlik" defaultOpen>
       <div className="settings-grid">
         <article className="panel settings-card">
           <h2>Canlı ortam</h2>
@@ -234,9 +286,11 @@ export function SettingsPage({
           <b>{model.book?.baseCurrency ?? "TRY"}</b>
         </div>
       </article>
+      </SettingsGroup>
 
       {actionError ? <InlineFeedback tone="error">{actionError}</InlineFeedback> : null}
 
+      <SettingsGroup id="kategoriler" title="Kategoriler">
       <article className="panel settings-card">
         <header className="panel-head">
           <div>
@@ -316,7 +370,9 @@ export function SettingsPage({
           ) : null}
         </div>
       </article>
+      </SettingsGroup>
 
+      <SettingsGroup id="masraf-merkezleri" title="Masraf merkezleri">
       <article className="panel settings-card">
         <header className="panel-head">
           <div>
@@ -396,8 +452,9 @@ export function SettingsPage({
           ) : null}
         </div>
       </article>
+      </SettingsGroup>
 
-      <div className="settings-grid">
+      <SettingsGroup id="hesap-turleri" title="Hesap türleri">
         <article className="panel settings-card">
           <header className="panel-head">
             <div>
@@ -482,7 +539,9 @@ export function SettingsPage({
             ) : null}
           </div>
         </article>
+      </SettingsGroup>
 
+      <SettingsGroup id="birikim-turleri" title="Birikim türleri">
         <article className="panel settings-card">
           <header className="panel-head">
             <div>
@@ -558,7 +617,9 @@ export function SettingsPage({
             ) : null}
           </div>
         </article>
+      </SettingsGroup>
 
+      <SettingsGroup id="araclar" title="Yatırım araçları ve fiyatlar">
         <article className="panel settings-card">
           <header className="panel-head">
             <div>
@@ -667,7 +728,9 @@ export function SettingsPage({
             ) : null}
           </div>
         </article>
+      </SettingsGroup>
 
+      <SettingsGroup id="para" title="Para birimleri">
         <article className="panel settings-card">
           <h2>Para Birimleri</h2>
           <div className="market-price-toolbar">
@@ -740,7 +803,7 @@ export function SettingsPage({
             })}
           </div>
         </article>
-      </div>
+      </SettingsGroup>
 
       {dialog?.type === "account-type" ? (
         <AccountTypeDialog

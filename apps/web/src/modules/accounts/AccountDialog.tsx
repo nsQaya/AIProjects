@@ -8,6 +8,7 @@ import {
   DialogCancelButton,
   DialogFeedback,
   DialogHeader,
+  SearchableSelect,
 } from "../../components/ui";
 import { errorMessage } from "../../lib/error-message";
 import type {
@@ -166,21 +167,19 @@ export function AccountDialog({
 
           <label>
             <span>Hesap türü</span>
-            <select
+            <SearchableSelect
               name="accountTypeId"
               required
               value={accountTypeId}
-              onChange={(event) => handleAccountTypeChange(event.currentTarget.value)}
-            >
-              {!accountTypes.some((option) => option.id === accountTypeId) && account ? (
-                <option value={accountTypeId}>{account.accountTypeName}</option>
-              ) : null}
-              {accountTypes.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.name}
-                </option>
-              ))}
-            </select>
+              onChange={handleAccountTypeChange}
+              placeholder="Hesap türü seçin"
+              options={[
+                ...(!accountTypes.some((option) => option.id === accountTypeId) && account
+                  ? [{ value: accountTypeId, label: account.accountTypeName }]
+                  : []),
+                ...accountTypes.map((option) => ({ value: option.id, label: option.name })),
+              ]}
+            />
           </label>
 
           {editing ? (
@@ -192,13 +191,15 @@ export function AccountDialog({
           ) : (
             <label>
               <span>Para birimi</span>
-              <select name="currencyCode" defaultValue="TRY">
-                {currencyOptions.map((option) => (
-                  <option key={option.code} value={option.code}>
-                    {option.code} · {option.nameTr}
-                  </option>
-                ))}
-              </select>
+              <SearchableSelect
+                name="currencyCode"
+                defaultValue="TRY"
+                placeholder="Para birimi seçin"
+                options={currencyOptions.map((option) => ({
+                  value: option.code,
+                  label: `${option.code} · ${option.nameTr}`,
+                }))}
+              />
               <small>Döviz için önce Ayarlar’dan o para birimini etkinleştirin.</small>
             </label>
           )}

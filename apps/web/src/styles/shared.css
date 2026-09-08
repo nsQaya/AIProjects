@@ -623,3 +623,258 @@
 .data-table td small {
   color: var(--muted);
 }
+
+/* Searchable select ------------------------------------------------------- */
+.searchable-select {
+  position: relative;
+  width: 100%;
+  max-width: 320px;
+  min-width: 0;
+}
+
+.form-grid .searchable-select,
+.report-drill-filters .searchable-select {
+  max-width: 100%;
+}
+
+.searchable-select::after {
+  content: "⌄";
+  position: absolute;
+  right: 12px;
+  top: 11px;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.searchable-select-input {
+  width: 100%;
+  padding-right: 30px;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.searchable-select-input:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+.searchable-select-menu {
+  position: fixed;
+  z-index: 60;
+  max-height: 260px;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 12px 30px rgba(16, 35, 26, .16);
+}
+
+.searchable-select-option {
+  padding: 8px 9px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  border-radius: 7px;
+  color: var(--ink);
+  font-size: 12px;
+  white-space: normal;
+  word-break: break-word;
+  cursor: pointer;
+}
+
+.searchable-select-option.is-active {
+  background: var(--green-soft);
+}
+
+.searchable-select-option[aria-selected="true"] {
+  color: var(--forest-700);
+  font-weight: 700;
+}
+
+.searchable-select-option.is-disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+.searchable-select-option-hint {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.searchable-select-empty {
+  padding: 10px 9px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* Collapsible settings groups ------------------------------------------------ */
+.settings-group {
+  display: grid;
+}
+
+.settings-group > summary {
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  list-style: none;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--paper);
+  box-shadow: var(--shadow);
+}
+
+.settings-group > summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-group[open] > summary {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.settings-group > summary h2 {
+  font-family: Georgia, serif;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.settings-group > summary:focus-visible {
+  outline: 2px solid var(--forest-700);
+  outline-offset: -2px;
+}
+
+.settings-group-chevron {
+  color: var(--muted);
+  font-size: 15px;
+  transition: transform .15s ease;
+}
+
+.settings-group[open] .settings-group-chevron {
+  transform: rotate(180deg);
+}
+
+.settings-group-body {
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-top: 0;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  background: var(--cream);
+}
+
+/* Back-to-top button ------------------------------------------------------- */
+.scroll-top-button {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 25;
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  border: 0;
+  border-radius: 50%;
+  background: var(--forest-700);
+  box-shadow: 0 10px 26px rgba(29, 107, 81, .28);
+}
+
+.scroll-top-button:hover {
+  background: #165c45;
+}
+
+.scroll-top-button svg {
+  width: 18px;
+  height: 18px;
+}
+
+@media (max-width: 760px) {
+  .scroll-top-button {
+    right: 20px;
+    bottom: 88px;
+  }
+
+  /* Upcoming filter bar: a clean two-up grid instead of a ragged wrap. */
+  .upcoming-filters #upcoming-kind-filter,
+  .upcoming-filters > .multi-select-filter,
+  .upcoming-filters .date-filter {
+    flex: 1 1 calc(50% - 5px);
+    min-width: 0;
+  }
+
+  .upcoming-filters .date-filter input {
+    min-width: 0;
+  }
+
+  .upcoming-filters #clear-upcoming-filters {
+    flex: 1 1 100%;
+  }
+
+  .schedule-panel .panel-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .schedule-panel .panel-head .secondary-button {
+    align-self: flex-start;
+    white-space: nowrap;
+  }
+
+  /* Upcoming rows become a card: title + amount on top, actions on their own line. */
+  .schedule-row {
+    min-height: 0;
+    padding: 14px 0;
+    align-items: start;
+    column-gap: 10px;
+    row-gap: 10px;
+    grid-template-columns: 16px 1fr auto;
+    grid-template-areas:
+      "dot info amount"
+      "dot actions actions";
+  }
+
+  .schedule-row .timeline-dot {
+    grid-area: dot;
+    align-self: start;
+    height: auto;
+    padding-top: 4px;
+  }
+
+  .schedule-row .timeline-dot b {
+    display: none;
+  }
+
+  .schedule-row > div {
+    grid-area: info;
+    min-width: 0;
+  }
+
+  .schedule-row > b {
+    grid-area: amount;
+    align-self: start;
+    white-space: nowrap;
+    font-size: 13px;
+  }
+
+  .schedule-row .schedule-actions {
+    grid-area: actions;
+    justify-content: flex-start;
+    gap: 8px;
+  }
+
+  .schedule-row time,
+  .schedule-row .status-pill {
+    display: none;
+  }
+}

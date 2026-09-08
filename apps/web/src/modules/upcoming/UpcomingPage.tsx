@@ -115,7 +115,7 @@ export function UpcomingPage({ accounts, items, onDelete, onEdit, onNew, onReali
 
   return (
     <section className="page-section">
-      <div className="filter-bar transaction-filters" role="search" aria-label="Yaklaşan işlem filtreleri">
+      <div className="filter-bar transaction-filters upcoming-filters" role="search" aria-label="Yaklaşan işlem filtreleri">
         <div className="search-field">
           ⌕
           <input

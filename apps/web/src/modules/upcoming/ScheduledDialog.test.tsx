@@ -2,6 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { CategoryDTO, CostCenterDTO } from "@defterx/contracts";
 import type { AccountView, ScheduledTransactionView } from "../../finance/finance-views";
+import { chooseComboboxOption } from "../../test/combobox";
 import { ScheduledDialog } from "./ScheduledDialog";
 
 const accounts = ["Banka", "Nakit"].map((name, index) => ({
@@ -114,8 +115,8 @@ describe("ScheduledDialog", () => {
 
     await user.type(screen.getByLabelText("Başlık"), "Aylık yakıt");
     await user.type(screen.getByLabelText("Tutar"), "99,90");
-    await user.selectOptions(screen.getByLabelText("Kategori"), category.id);
-    await user.selectOptions(screen.getByLabelText("Masraf merkezi"), costCenter.id);
+    await chooseComboboxOption(user, "Kategori", category.name);
+    await chooseComboboxOption(user, "Masraf merkezi", costCenter.name);
     await user.click(screen.getByRole("button", { name: "Kaydet" }));
 
     await waitFor(() => {

@@ -7,6 +7,7 @@ import {
   DialogCancelButton,
   DialogFeedback,
   DialogHeader,
+  SearchableSelect,
 } from "../../components/ui";
 import { isoAtLocalNoon, today } from "../../lib/date";
 import { errorMessage } from "../../lib/error-message";
@@ -147,28 +148,69 @@ export function ScheduledDialog({ accounts, categories, costCenters, item, onClo
           <label><span>Tutar</span><input name="amount" inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} required /></label>
           <label>
             <span id="scheduled-account-caption">{kind === "transfer" ? "Kaynak hesap" : "Hesap"}</span>
-            <select name="accountId" value={accountId} onChange={(event) => setAccountId(event.target.value)} required>
-              <option value="">Hesap seçin</option>
-              {availableAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}{account.isArchived ? " · Arşivli" : ""}</option>)}
-            </select>
+            <SearchableSelect
+              name="accountId"
+              value={accountId}
+              onChange={setAccountId}
+              required
+              placeholder="Hesap seçin"
+              options={availableAccounts.map((account) => ({
+                value: account.id,
+                label: account.name,
+                hint: account.isArchived ? "· Arşivli" : undefined,
+              }))}
+            />
           </label>
-          <label className="scheduled-target" hidden={kind !== "transfer"}><span>Hedef hesap</span><select name="targetAccountId" value={targetAccountId} onChange={(event) => setTargetAccountId(event.target.value)} required={kind === "transfer"} disabled={kind !== "transfer"}><option value="">Hedef seçin</option>{availableAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
-          <label className="scheduled-category" hidden={kind === "transfer"}><span>Kategori</span><select name="categoryId" value={categoryId} onChange={(event) => setCategoryId(event.target.value)} required={kind !== "transfer"} disabled={kind === "transfer"}><option value="">Kategori seçin</option>{availableCategories.filter((category) => category.categoryType === kind.toUpperCase()).map((category) => <option key={category.id} value={category.id}>{category.name}{category.isActive ? "" : " · Pasif"}</option>)}</select></label>
+          <label className="scheduled-target" hidden={kind !== "transfer"}>
+            <span>Hedef hesap</span>
+            <SearchableSelect
+              name="targetAccountId"
+              value={targetAccountId}
+              onChange={setTargetAccountId}
+              required={kind === "transfer"}
+              disabled={kind !== "transfer"}
+              placeholder="Hedef seçin"
+              options={availableAccounts.map((account) => ({
+                value: account.id,
+                label: account.name,
+              }))}
+            />
+          </label>
+          <label className="scheduled-category" hidden={kind === "transfer"}>
+            <span>Kategori</span>
+            <SearchableSelect
+              name="categoryId"
+              value={categoryId}
+              onChange={setCategoryId}
+              required={kind !== "transfer"}
+              disabled={kind === "transfer"}
+              placeholder="Kategori seçin"
+              options={availableCategories
+                .filter((category) => category.categoryType === kind.toUpperCase())
+                .map((category) => ({
+                  value: category.id,
+                  label: category.name,
+                  hint: category.isActive ? undefined : "· Pasif",
+                }))}
+            />
+          </label>
           <label className="scheduled-cost-center" hidden={kind !== "expense"}>
             <span>Masraf merkezi</span>
-            <select
+            <SearchableSelect
               name="costCenterId"
               value={costCenterId}
-              onChange={(event) => setCostCenterId(event.target.value)}
+              onChange={setCostCenterId}
               disabled={kind !== "expense"}
-            >
-              <option value="">Masraf merkezi seçin (isteğe bağlı)</option>
-              {availableCostCenters.map((costCenter) => (
-                <option key={costCenter.id} value={costCenter.id}>
-                  {costCenter.name}{costCenter.isActive ? "" : " · Pasif"}
-                </option>
-              ))}
-            </select>
+              placeholder="Masraf merkezi seçin (isteğe bağlı)"
+              options={[
+                { value: "", label: "Masraf merkezi seçin (isteğe bağlı)" },
+                ...availableCostCenters.map((costCenter) => ({
+                  value: costCenter.id,
+                  label: costCenter.name,
+                  hint: costCenter.isActive ? undefined : "· Pasif",
+                })),
+              ]}
+            />
           </label>
           {!item ? (
             <label className="scheduled-repeat"><span>Tekrar</span><select name="repeat" value={repeat} onChange={(event) => setRepeat(event.target.value as ScheduledRepeat)}><option value="NONE">Tek sefer</option><option value="WEEKLY">Her hafta</option><option value="MONTHLY">Her ay aynı gün</option><option value="YEARLY">Her yıl</option></select></label>

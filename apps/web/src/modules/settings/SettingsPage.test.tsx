@@ -5,6 +5,7 @@ import type {
 } from "@defterx/contracts";
 import { describe, expect, it, vi } from "vitest";
 
+import { chooseComboboxOption } from "../../test/combobox";
 import { SettingsPage } from "./SettingsPage";
 import type { SettingsActions, SettingsViewModel } from "./settings-types";
 
@@ -437,10 +438,11 @@ describe("SettingsPage automatic market prices",()=>{
       onSaveInstrument,onSearchMarketSymbols,
     })}/>);
     await user.click(screen.getByRole("button",{name:"+ Araç"}));
-    await user.selectOptions(screen.getByLabelText("Tür"),"type-1");
-    await user.type(screen.getByLabelText("Borsa kodu ara"),"AAPL");
-    await waitFor(()=>expect(screen.getByRole("option",{name:/AAPL · Apple Inc\./})).toBeInTheDocument());
-    await user.selectOptions(screen.getByLabelText(/^Yahoo Finance kodu/),"market-aapl");
+    await chooseComboboxOption(user,"Tür","Hisse");
+    const yahooField=screen.getByLabelText(/^Yahoo Finance kodu/);
+    await user.click(yahooField);
+    await user.type(yahooField,"AAPL");
+    await user.click(await screen.findByRole("option",{name:/AAPL · Apple Inc\./}));
     expect(screen.getByLabelText("Sembol")).toHaveValue("AAPL");
     expect(screen.getByLabelText("Ad")).toHaveValue("Apple Inc.");
     await user.click(screen.getByRole("button",{name:"Kaydet"}));
@@ -488,10 +490,14 @@ describe("SettingsPage currency management",()=>{
       onSaveInstrument,
     })}/>);
     await user.click(screen.getByRole("button",{name:"+ Araç"}));
-    await user.selectOptions(screen.getByLabelText("Tür"),"type-1");
-    const currencySelect=screen.getByLabelText("Para birimi");
-    expect([...(currencySelect as HTMLSelectElement).options].map((option)=>option.value)).toEqual(["TRY","USD"]);
-    await user.selectOptions(currencySelect,"USD");
+    await chooseComboboxOption(user,"Tür","Hisse");
+    const currencyField=screen.getByLabelText("Para birimi");
+    await user.click(currencyField);
+    expect(
+      within(screen.getByRole("listbox")).getAllByRole("option").map((option)=>option.textContent),
+    ).toEqual(["TRY · TÜRK LİRASI", "USD · ABD DOLARI"]);
+    await user.keyboard("{Escape}");
+    await chooseComboboxOption(user,currencyField,"USD · ABD DOLARI");
     await user.type(screen.getByLabelText("Ad"),"Yurt dışı fon");
     await user.click(screen.getByRole("button",{name:"Kaydet"}));
     await waitFor(()=>expect(onSaveInstrument).toHaveBeenCalledWith(expect.objectContaining({

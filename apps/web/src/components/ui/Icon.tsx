@@ -17,6 +17,11 @@ const iconPaths = {
       <path d="M4 20V10m6 10V4m6 16v-7m4 7H2" />
     </>
   ),
+  "chevron-up": (
+    <>
+      <path d="m6 15 6-6 6 6" />
+    </>
+  ),
   close: (
     <>
       <path d="m6 6 12 12M18 6 6 18" />

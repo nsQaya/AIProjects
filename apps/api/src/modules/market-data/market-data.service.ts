@@ -543,7 +543,8 @@ export async function listBookInstrumentPrices(client: DbClient, bookId: string,
      LEFT JOIN market_daily_prices mp ON mp.market_symbol_id=i.market_symbol_id AND mp.price_date=$2::date
      LEFT JOIN LATERAL (
        SELECT price FROM investment_prices
-       WHERE instrument_id=i.id AND (priced_at AT TIME ZONE 'Europe/Istanbul')::date=$2::date
+       WHERE instrument_id=i.id AND i.market_symbol_id IS NULL
+         AND (priced_at AT TIME ZONE 'Europe/Istanbul')::date=$2::date
        ORDER BY priced_at DESC LIMIT 1
      ) manual ON true
      WHERE i.book_id=$1 AND i.deleted_at IS NULL ORDER BY i.name`,

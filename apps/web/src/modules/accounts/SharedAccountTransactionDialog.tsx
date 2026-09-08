@@ -8,6 +8,7 @@ import {
   DialogCancelButton,
   DialogFeedback,
   DialogHeader,
+  SearchableSelect,
 } from "../../components/ui";
 import { isoAtLocalNoon, today } from "../../lib/date";
 import { errorMessage } from "../../lib/error-message";
@@ -181,36 +182,32 @@ export function SharedAccountTransactionDialog({
           </label>
           <label>
             <span>Kategori</span>
-            <select
+            <SearchableSelect
               name="categoryId"
               value={categoryId}
-              onChange={(event) => setCategoryId(event.target.value)}
+              onChange={setCategoryId}
               required
               disabled={context === null}
-            >
-              <option value="">Kategori seçin</option>
-              {categories.map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                </option>
-              ))}
-            </select>
+              placeholder="Kategori seçin"
+              options={categories.map((category) => ({
+                value: category.id,
+                label: category.name,
+              }))}
+            />
           </label>
           <label hidden={kind !== "expense"}>
             <span>Masraf merkezi</span>
-            <select
+            <SearchableSelect
               name="costCenterId"
               value={costCenterId}
-              onChange={(event) => setCostCenterId(event.target.value)}
+              onChange={setCostCenterId}
               disabled={kind !== "expense" || context === null}
-            >
-              <option value="">Masraf merkezi seçin (isteğe bağlı)</option>
-              {costCenters.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
+              placeholder="Masraf merkezi seçin (isteğe bağlı)"
+              options={[
+                { value: "", label: "Masraf merkezi seçin (isteğe bağlı)" },
+                ...costCenters.map((item) => ({ value: item.id, label: item.name })),
+              ]}
+            />
           </label>
         </div>
 

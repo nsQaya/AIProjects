@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+import { chooseComboboxOption } from "../../test/combobox";
 import { FxConversionDialog } from "./FxConversionDialog";
 import type { FxAccountOption } from "./fx-types";
 
@@ -17,8 +18,8 @@ describe("FxConversionDialog", () => {
     render(<FxConversionDialog accounts={accounts} onClose={onClose} onSubmit={onSubmit} />);
 
     await screen.findByRole("dialog", { name: "Döviz al" });
-    await user.selectOptions(screen.getByLabelText("TL hesabı"), "account-try");
-    await user.selectOptions(screen.getByLabelText("Döviz hesabı"), "account-usd");
+    await chooseComboboxOption(user, "TL hesabı", "Ziraat TL");
+    await chooseComboboxOption(user, "Döviz hesabı", "Piapiri USD · USD");
     await user.type(screen.getByLabelText(/Ödenen tutar/), "35240");
     await user.type(screen.getByLabelText(/Alınan tutar \(USD\)/), "1000");
 
@@ -53,8 +54,8 @@ describe("FxConversionDialog", () => {
     );
 
     await screen.findByRole("dialog", { name: "Döviz sat" });
-    await user.selectOptions(screen.getByLabelText("TL hesabı"), "account-try");
-    await user.selectOptions(screen.getByLabelText("Döviz hesabı"), "account-usd");
+    await chooseComboboxOption(user, "TL hesabı", "Ziraat TL");
+    await chooseComboboxOption(user, "Döviz hesabı", "Piapiri USD · USD");
     await user.type(screen.getByLabelText(/Alınan tutar \(TL\)/), "40000");
     await user.type(screen.getByLabelText(/Satılan tutar/), "1000");
     await user.click(screen.getByRole("button", { name: "Dövizi sat" }));
@@ -77,8 +78,8 @@ describe("FxConversionDialog", () => {
     render(<FxConversionDialog accounts={accounts} onClose={vi.fn()} onSubmit={onSubmit} />);
 
     await screen.findByRole("dialog", { name: "Döviz al" });
-    await user.selectOptions(screen.getByLabelText("TL hesabı"), "account-try");
-    await user.selectOptions(screen.getByLabelText("Döviz hesabı"), "account-usd");
+    await chooseComboboxOption(user, "TL hesabı", "Ziraat TL");
+    await chooseComboboxOption(user, "Döviz hesabı", "Piapiri USD · USD");
     await user.type(screen.getByLabelText(/Ödenen tutar/), "35240");
     await user.type(screen.getByLabelText(/Alınan tutar \(USD\)/), "abc");
     await user.click(screen.getByRole("button", { name: "Dövizi al" }));

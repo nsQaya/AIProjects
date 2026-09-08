@@ -16,6 +16,7 @@ import {
   DialogCancelButton,
   DialogFeedback,
   DialogHeader,
+  SearchableSelect,
 } from "../../components/ui";
 import { isoAtLocalNoon, today } from "../../lib/date";
 import { errorMessage } from "../../lib/error-message";
@@ -593,19 +594,14 @@ export function InstrumentDialog({
         <div className="form-grid dialog-form-grid">
           <label>
             <span>Tür</span>
-            <select
+            <SearchableSelect
               name="assetTypeId"
               defaultValue={instrument?.assetTypeId ?? ""}
               disabled={busy}
               required
-            >
-              <option value="">Tür seçin</option>
-              {selectableTypes.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
+              placeholder="Tür seçin"
+              options={selectableTypes.map((item) => ({ value: item.id, label: item.name }))}
+            />
           </label>
           <label>
             <span>Sembol</span>
@@ -620,16 +616,17 @@ export function InstrumentDialog({
           </label>
           <label>
             <span>Para birimi</span>
-            <select
+            <SearchableSelect
               name="currencyCode"
               value={currencyCode}
-              disabled={busy||Boolean(marketSymbolId)}
-              onChange={event=>setCurrencyCode(event.target.value)}
-            >
-              {selectableCurrencies.map(item=>(
-                <option key={item.code} value={item.code}>{item.code} · {item.nameTr}</option>
-              ))}
-            </select>
+              disabled={busy || Boolean(marketSymbolId)}
+              onChange={setCurrencyCode}
+              placeholder="Para birimi"
+              options={selectableCurrencies.map((item) => ({
+                value: item.code,
+                label: `${item.code} · ${item.nameTr}`,
+              }))}
+            />
             {marketSymbolId
               ? <small>Yahoo Finance koduna bağlı araçlarda para birimi otomatik belirlenir.</small>
               : selectableCurrencies.length<=1
@@ -648,37 +645,39 @@ export function InstrumentDialog({
             </select>
           </label>
           <label className="full-field">
-            <span>Borsa kodu ara</span>
-            <input
-              value={marketQuery}
-              onChange={event=>setMarketQuery(event.target.value)}
-              placeholder="Örn. THYAO, AAPL veya fon adı"
-              disabled={busy}
-            />
-          </label>
-          <label className="full-field">
             <span>Yahoo Finance kodu (otomatik fiyat)</span>
-            <select
+            <SearchableSelect
               name="marketSymbolId"
               value={marketSymbolId}
               disabled={busy}
-              onChange={event=>{
-                const id=event.target.value;
+              onSearchChange={setMarketQuery}
+              placeholder="Kod aramak için yazın (THYAO, AAPL, fon adı…)"
+              emptyMessage="Eşleşen kod yok"
+              onChange={(id) => {
                 setMarketSymbolId(id);
-                const selected=marketSymbols.find(item=>item.id===id);
-                if(selected){setSymbol(selected.providerSymbol);setName(selected.name);}
+                const selected = marketSymbols.find((item) => item.id === id);
+                if (selected) {
+                  setSymbol(selected.providerSymbol);
+                  setName(selected.name);
+                }
               }}
-            >
-              <option value="">Otomatik fiyat kullanma</option>
-              {instrument?.marketSymbolId&&!marketSymbols.some(item=>item.id===instrument.marketSymbolId)?(
-                <option value={instrument.marketSymbolId}>{instrument.providerSymbol??instrument.symbol} · {instrument.name}</option>
-              ):null}
-              {marketSymbols.map(item=>(
-                <option key={item.id} value={item.id}>
-                  {item.providerSymbol} · {item.name} · {item.exchangeCode}
-                </option>
-              ))}
-            </select>
+              options={[
+                { value: "", label: "Otomatik fiyat kullanma" },
+                ...(instrument?.marketSymbolId &&
+                !marketSymbols.some((item) => item.id === instrument.marketSymbolId)
+                  ? [
+                      {
+                        value: instrument.marketSymbolId,
+                        label: `${instrument.providerSymbol ?? instrument.symbol} · ${instrument.name}`,
+                      },
+                    ]
+                  : []),
+                ...marketSymbols.map((item) => ({
+                  value: item.id,
+                  label: `${item.providerSymbol} · ${item.name} · ${item.exchangeCode}`,
+                })),
+              ]}
+            />
             <small>Kod seçildiğinde kapanış fiyatları günlük olarak otomatik güncellenir.</small>
           </label>
           <label className="full-field">

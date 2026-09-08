@@ -7,11 +7,12 @@ import {
   DialogCancelButton,
   DialogFeedback,
   DialogHeader,
+  SearchableSelect,
 } from "../../components/ui";
 import { isoAtLocalNoon, isoDay, today } from "../../lib/date";
 import { errorMessage } from "../../lib/error-message";
 import { nonNegativeDecimalString, positiveDecimalString } from "./decimal";
-import { toNumber } from "../../lib/format";
+import { formatQuantity, toNumber } from "../../lib/format";
 import type {
   CapitalIncreaseValues,
   InvestmentAccountOption,
@@ -145,21 +146,18 @@ export function LotDialog({
         <div className="form-grid dialog-form-grid">
           <label className="full-field">
             <span>Yatırım aracı</span>
-            <select
+            <SearchableSelect
               name="instrumentId"
               defaultValue={lot?.instrumentId ?? ""}
               disabled={busy}
               required
-            >
-              <option value="">Yatırım aracı seçin</option>
-              {selectableInstruments.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                  {item.symbol ? ` (${item.symbol})` : ""}
-                  {!item.isActive ? " · Pasif" : ""}
-                </option>
-              ))}
-            </select>
+              placeholder="Yatırım aracı seçin"
+              options={selectableInstruments.map((item) => ({
+                value: item.id,
+                label: `${item.name}${item.symbol ? ` (${item.symbol})` : ""}`,
+                hint: item.isActive ? undefined : "· Pasif",
+              }))}
+            />
           </label>
           <label>
             <span>Adet</span>
@@ -193,18 +191,20 @@ export function LotDialog({
           </label>
           <label>
             <span>Hangi aracı kurum hesabından? (isteğe bağlı)</span>
-            <select
+            <SearchableSelect
               name="accountId"
               defaultValue={lot?.accountId ?? ""}
               disabled={busy}
-            >
-              <option value="">Hesap seçme</option>
-              {selectableAccounts.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}{item.isArchived ? " · Arşivli" : ""}
-                </option>
-              ))}
-            </select>
+              placeholder="Hesap seçme"
+              options={[
+                { value: "", label: "Hesap seçme" },
+                ...selectableAccounts.map((item) => ({
+                  value: item.id,
+                  label: item.name,
+                  hint: item.isArchived ? "· Arşivli" : undefined,
+                })),
+              ]}
+            />
             <small>Hesap seçersen alım bedeli o hesabın nakitinden düşülür.</small>
           </label>
           <label className="full-field">
@@ -358,22 +358,20 @@ export function SaleDialog({
         <div className="form-grid dialog-form-grid">
           <label className="full-field">
             <span>Satılacak yatırım aracı</span>
-            <select
+            <SearchableSelect
               name="instrumentId"
               defaultValue={sale?.instrumentId ?? ""}
               disabled={busy}
               required
-            >
-              <option value="">Yatırım aracı seçin</option>
-              {selectableInstruments.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                  {item.symbol ? ` (${item.symbol})` : ""}
-                  {item.quantity ? ` · ${item.quantity} adet` : ""}
-                  {!item.isActive ? " · Pasif" : ""}
-                </option>
-              ))}
-            </select>
+              placeholder="Yatırım aracı seçin"
+              options={selectableInstruments.map((item) => ({
+                value: item.id,
+                label: `${item.name}${item.symbol ? ` (${item.symbol})` : ""}${
+                  item.quantity ? ` · ${formatQuantity(item.quantity)} adet` : ""
+                }`,
+                hint: item.isActive ? undefined : "· Pasif",
+              }))}
+            />
           </label>
           <label>
             <span>Satılacak adet</span>
@@ -407,19 +405,18 @@ export function SaleDialog({
           </label>
           <label className="full-field">
             <span>Para hangi hesaba geçti?</span>
-            <select
+            <SearchableSelect
               name="destinationAccountId"
               defaultValue={sale?.destinationAccountId ?? ""}
               disabled={busy}
               required
-            >
-              <option value="">Paranın geçtiği hesabı seçin</option>
-              {selectableAccounts.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}{item.isArchived ? " · Arşivli" : ""}
-                </option>
-              ))}
-            </select>
+              placeholder="Paranın geçtiği hesabı seçin"
+              options={selectableAccounts.map((item) => ({
+                value: item.id,
+                label: item.name,
+                hint: item.isArchived ? "· Arşivli" : undefined,
+              }))}
+            />
           </label>
           <label className="full-field">
             <span>Not</span>
@@ -534,21 +531,20 @@ export function CapitalIncreaseDialog({
         <div className="form-grid dialog-form-grid">
           <label className="full-field">
             <span>Yatırım aracı</span>
-            <select
+            <SearchableSelect
               name="instrumentId"
               value={instrumentId}
               disabled={busy}
-              onChange={(event) => setInstrumentId(event.target.value)}
+              onChange={setInstrumentId}
               required
-            >
-              <option value="">Açık pozisyon seçin</option>
-              {positions.map((item) => (
-                <option key={item.instrumentId} value={item.instrumentId}>
-                  {item.name}
-                  {item.symbol ? ` (${item.symbol})` : ""} · {item.quantity} adet
-                </option>
-              ))}
-            </select>
+              placeholder="Açık pozisyon seçin"
+              options={positions.map((item) => ({
+                value: item.instrumentId,
+                label: `${item.name}${item.symbol ? ` (${item.symbol})` : ""} · ${formatQuantity(
+                  item.quantity,
+                )} adet`,
+              }))}
+            />
             {linkedInstrument ? (
               <small>
                 Bu araç Yahoo’ya bağlı; oran bölünmeleri otomatik uygulanır. Bedelsiz
@@ -560,7 +556,7 @@ export function CapitalIncreaseDialog({
             <span>Yeni toplam adet</span>
             <input name="newTotalQuantity" inputMode="decimal" disabled={busy} required />
             {currentQuantity !== null ? (
-              <small>Şu an: {selected?.quantity} adet</small>
+              <small>Şu an: {formatQuantity(selected?.quantity)} adet</small>
             ) : null}
           </label>
           <label>
@@ -576,14 +572,16 @@ export function CapitalIncreaseDialog({
           </label>
           <label className="full-field">
             <span>{paid ? "Ödeme hangi hesaptan? (gerekli)" : "Aracı kurum hesabı (isteğe bağlı)"}</span>
-            <select name="accountId" disabled={busy} defaultValue="">
-              <option value="">Hesap seçme</option>
-              {selectableAccounts.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
+            <SearchableSelect
+              name="accountId"
+              disabled={busy}
+              defaultValue=""
+              placeholder="Hesap seçme"
+              options={[
+                { value: "", label: "Hesap seçme" },
+                ...selectableAccounts.map((item) => ({ value: item.id, label: item.name })),
+              ]}
+            />
           </label>
           <label>
             <span>Tarih</span>

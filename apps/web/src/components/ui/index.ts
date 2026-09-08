@@ -5,3 +5,5 @@ export * from "./ExportMenu";
 export * from "./Feedback";
 export * from "./Icon";
 export * from "./LoadingState";
+export * from "./ScrollToTopButton";
+export * from "./SearchableSelect";

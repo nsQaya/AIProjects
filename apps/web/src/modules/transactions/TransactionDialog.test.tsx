@@ -2,6 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { CategoryDTO, CostCenterDTO } from "@defterx/contracts";
 import type { AccountView, TransactionView } from "../../finance/finance-views";
+import { chooseComboboxOption } from "../../test/combobox";
 import { TransactionDialog } from "./TransactionDialog";
 
 const account = {
@@ -130,8 +131,8 @@ describe("TransactionDialog", () => {
 
     await user.type(screen.getByLabelText(/Tutar/), "125,50");
     await user.type(screen.getByLabelText("Açıklama"), "Araç yakıtı");
-    await user.selectOptions(screen.getByLabelText("Kategori"), category.id);
-    await user.selectOptions(screen.getByLabelText("Masraf merkezi"), costCenter.id);
+    await chooseComboboxOption(user, "Kategori", category.name);
+    await chooseComboboxOption(user, "Masraf merkezi", costCenter.name);
     await user.click(screen.getByRole("button", { name: "Kaydet" }));
 
     await waitFor(() => {
@@ -237,7 +238,7 @@ describe("TransactionDialog", () => {
     expect(screen.getByLabelText("Açıklama")).toHaveValue("Aylık kira");
     expect(screen.getByLabelText(/Tutar/)).toHaveValue("3500,000000");
     expect(screen.getByLabelText("Tarih")).toHaveValue("2026-09-01");
-    expect(screen.getByLabelText("Kategori")).toHaveValue(category.id);
+    expect(screen.getByLabelText("Kategori")).toHaveValue(category.name);
 
     await user.clear(screen.getByLabelText(/Tutar/));
     await user.type(screen.getByLabelText(/Tutar/), "3650,50");

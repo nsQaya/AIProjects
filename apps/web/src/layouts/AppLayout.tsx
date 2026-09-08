@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 
-import { Button, Icon, IconButton, type IconName } from "../components/ui";
+import { Button, Icon, IconButton, ScrollToTopButton, type IconName } from "../components/ui";
 import type { HealthStatus } from "../platform/api/api-client";
 import type { AuthUser } from "../platform/auth/auth-schemas";
 import { routeForPath, routes } from "../application/route-meta";
@@ -133,6 +133,7 @@ export function AppLayout({
       <Button className="mobile-fab" variant="primary" data-open-entry aria-label="Yeni işlem" onClick={onNewTransaction}>
         <Icon name="plus" />
       </Button>
+      <ScrollToTopButton />
       {transactionDialog}
     </>
   );

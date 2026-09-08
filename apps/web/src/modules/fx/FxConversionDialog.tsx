@@ -7,6 +7,7 @@ import {
   DialogCancelButton,
   DialogFeedback,
   DialogHeader,
+  SearchableSelect,
 } from "../../components/ui";
 import { isoAtLocalNoon, today } from "../../lib/date";
 import { errorMessage } from "../../lib/error-message";
@@ -139,35 +140,31 @@ export function FxConversionDialog({
 
           <label>
             <span>TL hesabı</span>
-            <select
+            <SearchableSelect
               value={tryAccountId}
               disabled={busy}
-              onChange={(event) => setTryAccountId(event.target.value)}
+              onChange={setTryAccountId}
               required
-            >
-              <option value="">TL hesabı seçin</option>
-              {tryAccounts.map((account) => (
-                <option key={account.id} value={account.id}>
-                  {account.name}
-                </option>
-              ))}
-            </select>
+              placeholder="TL hesabı seçin"
+              options={tryAccounts.map((account) => ({
+                value: account.id,
+                label: account.name,
+              }))}
+            />
           </label>
           <label>
             <span>Döviz hesabı</span>
-            <select
+            <SearchableSelect
               value={foreignAccountId}
               disabled={busy}
-              onChange={(event) => setForeignAccountId(event.target.value)}
+              onChange={setForeignAccountId}
               required
-            >
-              <option value="">Döviz hesabı seçin</option>
-              {foreignAccounts.map((account) => (
-                <option key={account.id} value={account.id}>
-                  {account.name} · {account.currencyCode}
-                </option>
-              ))}
-            </select>
+              placeholder="Döviz hesabı seçin"
+              options={foreignAccounts.map((account) => ({
+                value: account.id,
+                label: `${account.name} · ${account.currencyCode}`,
+              }))}
+            />
           </label>
           <label>
             <span>{buying ? "Ödenen tutar (TL)" : "Alınan tutar (TL)"}</span>

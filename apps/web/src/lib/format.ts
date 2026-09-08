@@ -75,3 +75,17 @@ export function decimalString(value: string): string | null {
   const amount = parseAmount(value);
   return amount > 0 ? String(amount) : null;
 }
+
+/**
+ * Trims the trailing-zero noise from a NUMERIC(24,9) quantity string for display
+ * ("21.000000000" -> "21", "12.500000000" -> "12,5"). Display only - never feed
+ * the result back into a mutation.
+ */
+export function formatQuantity(value: string | number | null | undefined): string {
+  if (value === null || value === undefined || value === "") return "";
+  const text = String(value);
+  const trimmed = text.includes(".")
+    ? text.replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "")
+    : text;
+  return trimmed.replace(".", ",");
+}

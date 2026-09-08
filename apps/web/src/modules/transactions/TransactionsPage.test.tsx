@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import type { CategoryDTO, CostCenterDTO } from "@defterx/contracts";
 
 import type { AccountView, TransactionView } from "../../finance/finance-views";
+import { chooseComboboxOption } from "../../test/combobox";
 import { downloadCsv } from "../../lib/csv";
 import { money } from "../../lib/format";
 import type { TransactionLedgerFilter } from "./transaction-types";
@@ -277,7 +278,7 @@ describe("TransactionsPage ledger controls", () => {
     const user = userEvent.setup();
     const { onLedgerFilterChange } = renderPage();
 
-    await user.selectOptions(screen.getByLabelText("Masraf merkezi"), COST_CENTER_ID);
+    await chooseComboboxOption(user, "Masraf merkezi", "Aile arabası");
 
     await waitFor(() => {
       expect(onLedgerFilterChange).toHaveBeenLastCalledWith(

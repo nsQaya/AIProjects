@@ -6,7 +6,7 @@ import type {
 } from "@defterx/contracts";
 
 import { ReportChart } from "../../components/charts";
-import { ExportMenu } from "../../components/ui";
+import { ExportMenu, SearchableSelect } from "../../components/ui";
 import type { AccountView } from "../../finance";
 import type { ReportRange } from "../../finance/finance-state";
 import { today } from "../../lib/date";
@@ -275,8 +275,30 @@ export function ReportsPage({
                 ) : null}
               </header>
               <div className="report-drill-filters">
-                <label><span>Kategori</span><select value={detailCategoryId} onChange={(event) => setDetailCategoryId(event.target.value)}><option value="">Tüm kategoriler</option>{analyticsCategories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-                <label><span>Masraf merkezi</span><select value={detailCostCenterId} onChange={(event) => setDetailCostCenterId(event.target.value)}><option value="">Tüm merkezler</option>{costCenterRows.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+                <label>
+                  <span>Kategori</span>
+                  <SearchableSelect
+                    value={detailCategoryId}
+                    onChange={setDetailCategoryId}
+                    placeholder="Tüm kategoriler"
+                    options={[
+                      { value: "", label: "Tüm kategoriler" },
+                      ...analyticsCategories.map((item) => ({ value: item.id, label: item.name })),
+                    ]}
+                  />
+                </label>
+                <label>
+                  <span>Masraf merkezi</span>
+                  <SearchableSelect
+                    value={detailCostCenterId}
+                    onChange={setDetailCostCenterId}
+                    placeholder="Tüm merkezler"
+                    options={[
+                      { value: "", label: "Tüm merkezler" },
+                      ...costCenterRows.map((item) => ({ value: item.id, label: item.name })),
+                    ]}
+                  />
+                </label>
               </div>
               <div className="report-table-wrap"><table className="report-table"><thead><tr><th>Tarih</th><th>İşlem</th><th>Kategori</th><th>Masraf merkezi</th><th>Hesap</th><th>Tutar</th></tr></thead><tbody>
                 {detailTransactions.map((transaction) => <tr key={transaction.id}><td>{reportDate(transaction.transactionDate)}</td><td>{transaction.title}</td><td>{transaction.categoryName ?? "—"}</td><td>{transaction.costCenterName ?? "—"}</td><td>{transaction.accountName ?? "—"}</td><td>{money(Number(transaction.amount))}</td></tr>)}

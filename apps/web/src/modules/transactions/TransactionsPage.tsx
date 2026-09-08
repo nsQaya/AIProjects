@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { CategoryDTO, CostCenterDTO, UUID } from "@defterx/contracts";
 
-import { Button, ConfirmDialog, InlineFeedback } from "../../components/ui";
+import { Button, ConfirmDialog, InlineFeedback, SearchableSelect } from "../../components/ui";
 import type { AccountView, TransactionView } from "../../finance/finance-views";
 import { FxConversionDialog, type FxConversionValues } from "../fx";
 import { downloadCsv, type CsvValue } from "../../lib/csv";
@@ -220,19 +220,21 @@ export function TransactionsPage({
           <option value="expense">Gider</option>
           <option value="transfer">Transfer</option>
         </select>
-        <select
+        <SearchableSelect
           aria-label="Masraf merkezi"
           id="transaction-cost-center-filter"
           value={costCenterId}
-          onChange={(event) => changeCostCenter(event.target.value)}
-        >
-          <option value="">Tüm masraf merkezleri</option>
-          {costCenters.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.name}{item.isActive ? "" : " · Pasif"}
-            </option>
-          ))}
-        </select>
+          onChange={changeCostCenter}
+          placeholder="Tüm masraf merkezleri"
+          options={[
+            { value: "", label: "Tüm masraf merkezleri" },
+            ...costCenters.map((item) => ({
+              value: item.id,
+              label: item.name,
+              hint: item.isActive ? undefined : "· Pasif",
+            })),
+          ]}
+        />
 
         <details className="multi-select-filter" id="transaction-account-filter">
           <summary><small>Hesaplar</small><span>{accountLabel}</span></summary>

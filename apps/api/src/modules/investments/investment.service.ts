@@ -13,13 +13,17 @@ const instrumentProjection = `i.id,i.book_id AS "bookId",i.asset_type_id AS "ass
   i.currency_code AS "currencyCode",i.is_active AS "isActive",i.version,
   latest.price::text AS "latestPrice",latest.priced_at AS "latestPriceAt"`;
 const marketJoin = `LEFT JOIN market_symbols market ON market.id=i.market_symbol_id`;
+// A market-linked instrument is priced from market data only; hand-entered
+// investment_prices apply solely to unlinked (TEFAS / manually priced) funds, so
+// the two branches never mix and can't flip-flop by recency.
 const latestPriceJoin = `LEFT JOIN LATERAL (
   SELECT candidate.price,candidate.priced_at FROM (
-    SELECT ip.price,ip.priced_at,0 priority FROM investment_prices ip WHERE ip.instrument_id=i.id
+    SELECT ip.price,ip.priced_at FROM investment_prices ip
+    WHERE ip.instrument_id=i.id AND i.market_symbol_id IS NULL
     UNION ALL
-    SELECT mp.close AS price,(mp.price_date::timestamp AT TIME ZONE 'Europe/Istanbul') AS priced_at,1 priority
+    SELECT mp.close AS price,(mp.price_date::timestamp AT TIME ZONE 'Europe/Istanbul') AS priced_at
     FROM market_daily_prices mp WHERE mp.market_symbol_id=i.market_symbol_id
-  ) candidate ORDER BY candidate.priced_at DESC,candidate.priority LIMIT 1
+  ) candidate ORDER BY candidate.priced_at DESC LIMIT 1
 ) latest ON true`;
 // Latest known TCMB rate for the instrument's own currency; NULL for TRY
 // instruments (never queried, see fxRate() below) and for a foreign currency
@@ -153,6 +157,8 @@ export async function deleteInstrument(client:DbClient,userId:string,id:string,v
 export async function setInstrumentPrice(client:DbClient,userId:string,instrumentId:string,input:CreatePriceInput){
   return inTransaction(client,async transaction=>{
     const bookId=await instrumentBookId(transaction,instrumentId);
+    const linked=await transaction.query(`SELECT 1 FROM investment_instruments WHERE id=$1 AND market_symbol_id IS NOT NULL AND deleted_at IS NULL`,[instrumentId]);
+    if(linked.rowCount)throw new AppError(422,"INSTRUMENT_MARKET_LINKED","Bir piyasa koduna bağlı araçta fiyat elle girilemez; önce otomatik fiyatı kaldırın");
     const result=await transaction.query(
       `INSERT INTO investment_prices(instrument_id,price,priced_at) VALUES($1,$2,$3)
        ON CONFLICT(instrument_id,priced_at) DO UPDATE SET price=excluded.price

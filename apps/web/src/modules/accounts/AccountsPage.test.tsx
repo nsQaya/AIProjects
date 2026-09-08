@@ -4,6 +4,7 @@ import type { AccountTypeDTO } from "@defterx/contracts";
 
 import { AccountsPage, type AccountSharingApi, type AccountViewModel } from ".";
 import type { SharedAccountView } from "../../finance/finance-views";
+import { chooseComboboxOption } from "../../test/combobox";
 
 const bankType: AccountTypeDTO = {
   id: "type-bank",
@@ -129,8 +130,8 @@ describe("AccountsPage", () => {
 
     const type = within(dialog).getByLabelText("Hesap türü");
     expect(type).toBeEnabled();
-    await user.selectOptions(type, creditCardType.id);
-    expect(type).toHaveValue(creditCardType.id);
+    await chooseComboboxOption(user, type, creditCardType.name);
+    expect(type).toHaveValue(creditCardType.name);
     expect(within(dialog).getByLabelText("Eksi bakiyeye izin ver")).toBeChecked();
 
     await user.click(within(dialog).getByRole("button", { name: "Kaydet" }));
@@ -327,10 +328,13 @@ describe("AccountsPage", () => {
     await user.click(screen.getByRole("button", { name: "+ Hesap ekle" }));
     const dialog = await screen.findByRole("dialog", { name: "Hesap ekle" });
     const currency = within(dialog).getByLabelText(/Para birimi/);
-    expect(within(currency).queryByRole("option", { name: /Euro/ })).not.toBeInTheDocument();
+    await user.click(currency);
+    expect(screen.queryByRole("option", { name: /Euro/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /ABD Doları/ })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
 
     await user.type(within(dialog).getByLabelText("Hesap adı"), "Piapiri USD");
-    await user.selectOptions(currency, "USD");
+    await chooseComboboxOption(user, currency, "USD · ABD Doları");
     await user.click(within(dialog).getByRole("button", { name: "Kaydet" }));
 
     await waitFor(() => {

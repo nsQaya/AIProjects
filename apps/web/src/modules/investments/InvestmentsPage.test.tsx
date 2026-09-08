@@ -2,6 +2,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { isoAtLocalNoon } from "../../lib/date";
+import { chooseComboboxOption } from "../../test/combobox";
 import { InvestmentsPage } from ".";
 import type {
   InvestmentAccountOption,
@@ -147,12 +148,13 @@ describe("InvestmentsPage", () => {
 
     await user.click(screen.getByRole("button", { name: "+ Birikim alımı" }));
     const dialog = await screen.findByRole("dialog", { name: "Birikim alımı" });
-    await user.selectOptions(within(dialog).getByLabelText("Yatırım aracı"), "instrument-fund");
+    await chooseComboboxOption(user, within(dialog).getByLabelText("Yatırım aracı"), /Teknoloji Fonu/);
     await user.type(within(dialog).getByLabelText("Adet"), "10,5000");
     await user.type(within(dialog).getByLabelText("Alış fiyatı"), "1.234,56");
-    await user.selectOptions(
+    await chooseComboboxOption(
+      user,
       within(dialog).getByLabelText(/Hangi aracı kurum hesabından/),
-      "account-bank",
+      "Piapiri TL",
     );
     const date = within(dialog).getByLabelText("Alış tarihi");
     await user.clear(date);
@@ -179,7 +181,8 @@ describe("InvestmentsPage", () => {
     expect(screen.getByRole("heading", { name: "Teknoloji Fonu" })).toBeInTheDocument();
     expect(screen.getByText(/Son fiyat/)).toHaveTextContent("Son fiyat ₺152,75");
     expect(screen.getByText(/Son fiyat/)).toHaveTextContent("6 Ağustos 2026");
-    expect(screen.getByText(/12\.5000 adet/)).toBeInTheDocument();
+    // Quantities are shown with trailing-zero noise trimmed ("12.5000" -> "12,5").
+    expect(screen.getByText(/12,5 adet/)).toBeInTheDocument();
   });
 
   it("groups a position under its brokerage account with a cash, cost and total summary", () => {
@@ -277,7 +280,7 @@ describe("InvestmentsPage", () => {
 
     await user.click(screen.getByRole("button", { name: "+ Sermaye artırımı" }));
     const dialog = await screen.findByRole("dialog", { name: "Sermaye artırımı / bölünme" });
-    await user.selectOptions(within(dialog).getByLabelText(/Yatırım aracı/), "instrument-fund");
+    await chooseComboboxOption(user, within(dialog).getByLabelText(/Yatırım aracı/), /Teknoloji Fonu/);
     expect(within(dialog).getByText(/oran bölünmeleri otomatik/)).toBeInTheDocument();
     await user.type(within(dialog).getByLabelText(/Yeni toplam adet/), "25");
     const date = within(dialog).getByLabelText("Tarih");
@@ -304,7 +307,7 @@ describe("InvestmentsPage", () => {
 
     await user.click(screen.getByRole("button", { name: "+ Sermaye artırımı" }));
     const dialog = await screen.findByRole("dialog", { name: "Sermaye artırımı / bölünme" });
-    await user.selectOptions(within(dialog).getByLabelText(/Yatırım aracı/), "instrument-fund");
+    await chooseComboboxOption(user, within(dialog).getByLabelText(/Yatırım aracı/), /Teknoloji Fonu/);
     await user.type(within(dialog).getByLabelText(/Yeni toplam adet/), "25");
     const paid = within(dialog).getByLabelText(/Bu artırım için ödenen tutar/);
     await user.clear(paid);
@@ -322,15 +325,17 @@ describe("InvestmentsPage", () => {
 
     await user.click(screen.getByRole("button", { name: "Birikim sat" }));
     const dialog = await screen.findByRole("dialog", { name: "Birikim satışı" });
-    await user.selectOptions(
+    await chooseComboboxOption(
+      user,
       within(dialog).getByLabelText("Satılacak yatırım aracı"),
-      "instrument-fund",
+      /Teknoloji Fonu/,
     );
     await user.type(within(dialog).getByLabelText("Satılacak adet"), "2,2500");
     await user.type(within(dialog).getByLabelText("Birim satış fiyatı"), "175,40");
-    await user.selectOptions(
+    await chooseComboboxOption(
+      user,
       within(dialog).getByLabelText("Para hangi hesaba geçti?"),
-      "account-bank",
+      "Piapiri TL",
     );
     const date = within(dialog).getByLabelText("Satış tarihi");
     await user.clear(date);
@@ -365,12 +370,18 @@ describe("InvestmentsPage", () => {
     expect(editButton).not.toBeNull();
     await user.click(editButton!);
     const dialog = await screen.findByRole("dialog", { name: "Satışı düzenle" });
-    expect(within(dialog).getByLabelText("Satılacak yatırım aracı")).toHaveValue("instrument-old");
+    const saleInstrument = within(dialog).getByLabelText("Satılacak yatırım aracı");
+    expect(saleInstrument).toHaveValue("Eski Fon (ESK)");
+    await user.click(saleInstrument);
     expect(within(dialog).getByRole("option", { name: /Eski Fon.*Pasif/ })).toBeInTheDocument();
-    expect(within(dialog).getByLabelText("Para hangi hesaba geçti?")).toHaveValue("account-old");
+    await user.keyboard("{Escape}");
+    const saleAccount = within(dialog).getByLabelText("Para hangi hesaba geçti?");
+    expect(saleAccount).toHaveValue("Eski yatırım hesabı");
+    await user.click(saleAccount);
     expect(
       within(dialog).getByRole("option", { name: /Eski yatırım hesabı.*Arşivli/ }),
     ).toBeInTheDocument();
+    await user.keyboard("{Escape}");
     const quantity = within(dialog).getByLabelText("Satılacak adet");
     await user.clear(quantity);
     await user.type(quantity, "1,1250");
@@ -414,9 +425,9 @@ describe("InvestmentsPage", () => {
     expect(editButton).not.toBeNull();
     await user.click(editButton!);
     const dialog = await screen.findByRole("dialog", { name: "Alımı düzenle" });
-    expect(within(dialog).getByLabelText("Yatırım aracı")).toHaveValue("instrument-old");
+    expect(within(dialog).getByLabelText("Yatırım aracı")).toHaveValue("Eski Fon (ESK)");
     expect(within(dialog).getByLabelText(/Hangi aracı kurum hesabından/)).toHaveValue(
-      "account-old",
+      "Eski yatırım hesabı",
     );
     await user.click(within(dialog).getByRole("button", { name: "Kaydet" }));
     await waitFor(() => {

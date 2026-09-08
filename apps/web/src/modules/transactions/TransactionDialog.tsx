@@ -7,6 +7,7 @@ import {
   DialogCancelButton,
   DialogFeedback,
   DialogHeader,
+  SearchableSelect,
 } from "../../components/ui";
 import { isoAtLocalNoon, today } from "../../lib/date";
 import { errorMessage } from "../../lib/error-message";
@@ -191,49 +192,71 @@ export function TransactionDialog({
           </label>
           <label>
             <span id="transaction-account-caption">{kind === "transfer" ? "Kaynak hesap" : "Hesap"}</span>
-            <select name="accountId" value={accountId} onChange={(event) => setAccountId(event.target.value)} required>
-              <option value="">Hesap seçin</option>
-              {availableAccounts.map((account) => (
-                <option key={account.id} value={account.id}>{account.name}{account.isArchived ? " · Arşivli" : ""}</option>
-              ))}
-            </select>
+            <SearchableSelect
+              name="accountId"
+              value={accountId}
+              onChange={setAccountId}
+              required
+              placeholder="Hesap seçin"
+              options={availableAccounts.map((account) => ({
+                value: account.id,
+                label: account.name,
+                hint: account.isArchived ? "· Arşivli" : undefined,
+              }))}
+            />
           </label>
 
           <label id="target-account-field" hidden={kind !== "transfer"}>
             <span>Hedef hesap</span>
-            <select name="targetAccountId" value={targetAccountId} onChange={(event) => setTargetAccountId(event.target.value)} required={kind === "transfer"} disabled={kind !== "transfer"}>
-              <option value="">Hedef hesap seçin</option>
-              {availableAccounts.map((account) => (
-                <option key={account.id} value={account.id}>{account.name}{account.isArchived ? " · Arşivli" : ""}</option>
-              ))}
-            </select>
+            <SearchableSelect
+              name="targetAccountId"
+              value={targetAccountId}
+              onChange={setTargetAccountId}
+              required={kind === "transfer"}
+              disabled={kind !== "transfer"}
+              placeholder="Hedef hesap seçin"
+              options={availableAccounts.map((account) => ({
+                value: account.id,
+                label: account.name,
+                hint: account.isArchived ? "· Arşivli" : undefined,
+              }))}
+            />
           </label>
           <label id="category-field" hidden={kind === "transfer"}>
             <span>Kategori</span>
-            <select name="categoryId" value={categoryId} onChange={(event) => setCategoryId(event.target.value)} disabled={kind === "transfer"} required={kind !== "transfer"}>
-              <option value="">Kategori seçin</option>
-              {availableCategories
+            <SearchableSelect
+              name="categoryId"
+              value={categoryId}
+              onChange={setCategoryId}
+              disabled={kind === "transfer"}
+              required={kind !== "transfer"}
+              placeholder="Kategori seçin"
+              options={availableCategories
                 .filter((category) => category.categoryType === kind.toUpperCase())
-                .map((category) => (
-                  <option key={category.id} value={category.id}>{category.name}{category.isActive ? "" : " · Pasif"}</option>
-                ))}
-            </select>
+                .map((category) => ({
+                  value: category.id,
+                  label: category.name,
+                  hint: category.isActive ? undefined : "· Pasif",
+                }))}
+            />
           </label>
           <label id="cost-center-field" hidden={kind !== "expense"}>
             <span>Masraf merkezi</span>
-            <select
+            <SearchableSelect
               name="costCenterId"
               value={costCenterId}
-              onChange={(event) => setCostCenterId(event.target.value)}
+              onChange={setCostCenterId}
               disabled={kind !== "expense"}
-            >
-              <option value="">Masraf merkezi seçin (isteğe bağlı)</option>
-              {availableCostCenters.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}{item.isActive ? "" : " · Pasif"}
-                </option>
-              ))}
-            </select>
+              placeholder="Masraf merkezi seçin (isteğe bağlı)"
+              options={[
+                { value: "", label: "Masraf merkezi seçin (isteğe bağlı)" },
+                ...availableCostCenters.map((item) => ({
+                  value: item.id,
+                  label: item.name,
+                  hint: item.isActive ? undefined : "· Pasif",
+                })),
+              ]}
+            />
           </label>
         </div>
 

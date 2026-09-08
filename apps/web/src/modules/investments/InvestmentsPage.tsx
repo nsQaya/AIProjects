@@ -5,7 +5,7 @@ import { ReportChart } from "../../components/charts";
 import { Button, InlineFeedback } from "../../components/ui";
 import type { CashFlowRange } from "../../finance";
 import { errorMessage } from "../../lib/error-message";
-import { dateText, money, moneyInCurrency, toNumber } from "../../lib/format";
+import { dateText, formatQuantity, money, moneyInCurrency, toNumber } from "../../lib/format";
 import { FxConversionDialog } from "../fx";
 import { summarizeAccountPortfolio, type AccountPortfolioGroup } from "./account-portfolio";
 import { isPositiveDecimal } from "./decimal";
@@ -261,7 +261,7 @@ export function InvestmentsPage({
                 <div className="table-row" key={item.id} data-sale-id={item.id}>
                   <span><b>{item.instrumentName}</b></span>
                   <span>{dateText(item.soldAt)}</span>
-                  <span>{item.quantity}</span>
+                  <span>{formatQuantity(item.quantity)}</span>
                   <span>{moneyInCurrency(item.unitPrice, item.currencyCode)}</span>
                   <span>{item.destinationAccountName}</span>
                   <strong className={toNumber(item.gain) < 0 ? "expense" : "income"}>
@@ -323,7 +323,7 @@ export function InvestmentsPage({
                     {kindLabel ? <small className="lot-kind"> · {kindLabel}</small> : null}
                   </span>
                   <span>{dateText(item.purchasedAt)}</span>
-                  <span>{item.quantity}</span>
+                  <span>{formatQuantity(item.quantity)}</span>
                   <span>{moneyInCurrency(item.unitPrice, item.currencyCode)}</span>
                   <strong>{moneyInCurrency(item.costBasis, item.currencyCode)}</strong>
                   <span className="lot-account">
@@ -466,7 +466,7 @@ function PortfolioPositionCard({ item }: { item: InvestmentPortfolioViewModel })
             : "TL karşılığı için kur bekleniyor"}
         </small>
       ) : null}
-      <small>{item.quantity} adet · Ort. maliyet {moneyInCurrency(averageCost, item.currencyCode)}</small>
+      <small>{formatQuantity(item.quantity)} adet · Ort. maliyet {moneyInCurrency(averageCost, item.currencyCode)}</small>
       <b className={itemGain < 0 ? "expense" : "income"}>
         {item.latestPrice !== null ? (
           <>
