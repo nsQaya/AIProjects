@@ -79,11 +79,21 @@ export async function register(pool: DbClient, env: Env, input: { email: string;
 }
 
 export async function login(pool: DbClient, env: Env, input: { email: string; password: string }) {
+  // MATERIALIZED forces Postgres to resolve the (indexed, ≤1-row) email lookup
+  // before joining to auth_credentials — otherwise the planner sometimes picks
+  // a join order that runs the expensive crypt() comparison once per row of a
+  // near-cross-join between users and auth_credentials instead of once for the
+  // matched user, turning a sub-millisecond lookup into a multi-second (or
+  // worse) one that trips statement_timeout. Seen in production for freshly
+  // registered accounts (login.analytics-unrelated planner quirk, not data
+  // corruption) — see defterx-login-crypt-join-order memory.
   const result = await pool.query<UserRow>(
-    `SELECT u.id,u.email,u.display_name FROM users u JOIN auth_credentials c ON c.user_id=u.id
-     WHERE lower(u.email)=lower($1)
-       AND c.password_hash=crypt(encode(digest($2::text, 'sha256'), 'base64'), c.password_hash)
-       AND u.status='ACTIVE' AND u.deleted_at IS NULL`,
+    `WITH matched_user AS MATERIALIZED (
+       SELECT id,email,display_name FROM users
+       WHERE lower(email)=lower($1) AND status='ACTIVE' AND deleted_at IS NULL
+     )
+     SELECT u.id,u.email,u.display_name FROM matched_user u JOIN auth_credentials c ON c.user_id=u.id
+     WHERE c.password_hash=crypt(encode(digest($2::text, 'sha256'), 'base64'), c.password_hash)`,
     [input.email, input.password],
   );
   const user = result.rows[0];

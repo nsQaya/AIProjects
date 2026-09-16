@@ -322,26 +322,32 @@ export async function loadReportAnalytics(
       ),
       pool.query(
         `WITH selected_accounts AS (${accountScope}), periods AS (
-           SELECT generate_series(date_trunc($6,$2::timestamptz),date_trunc($6,$3::timestamptz),$7::interval) bucket
+           -- bucket labels/groups each period by its start; bucket_end is the
+           -- "as of" instant actually used below to decide what counts (end of
+           -- that period, capped at $3 so an in-progress period — most often
+           -- today, the last bucket of any "to now" range — is valued as of
+           -- right now instead of a full period-length in the future).
+           SELECT bucket,LEAST(bucket+$7::interval,$3::timestamptz) bucket_end FROM
+             generate_series(date_trunc($6,$2::timestamptz),date_trunc($6,$3::timestamptz),$7::interval) bucket
          ), purchased AS (
-           SELECT l.instrument_id,p.bucket,
-             SUM(l.quantity) FILTER (WHERE l.purchased_at <= p.bucket) qty,
-             SUM(l.quantity*l.unit_price) FILTER (WHERE l.purchased_at <= p.bucket) cost
+           SELECT l.instrument_id,p.bucket,p.bucket_end,
+             SUM(l.quantity) FILTER (WHERE l.purchased_at <= p.bucket_end) qty,
+             SUM(l.quantity*l.unit_price) FILTER (WHERE l.purchased_at <= p.bucket_end) cost
            FROM periods p
            CROSS JOIN investment_lots l
            LEFT JOIN selected_accounts sa ON sa.id=l.account_id
            WHERE l.book_id=$1 AND l.deleted_at IS NULL
              AND ($5::boolean OR sa.id IS NOT NULL)
-           GROUP BY l.instrument_id,p.bucket
+           GROUP BY l.instrument_id,p.bucket,p.bucket_end
          ), sold AS (
            SELECT s.instrument_id,p.bucket,
-             SUM(s.quantity) FILTER (WHERE s.sold_at <= p.bucket) qty
+             SUM(s.quantity) FILTER (WHERE s.sold_at <= p.bucket_end) qty
            FROM periods p
            CROSS JOIN investment_sales s
            WHERE s.book_id=$1 AND s.deleted_at IS NULL
            GROUP BY s.instrument_id,p.bucket
          ), positions AS (
-           SELECT pu.bucket,pu.instrument_id,
+           SELECT pu.bucket,pu.bucket_end,pu.instrument_id,
              GREATEST(COALESCE(pu.qty,0)-COALESCE(so.qty,0),0) net_qty,
              pu.qty AS purchased_qty,pu.cost AS purchased_cost
            FROM purchased pu
@@ -361,11 +367,11 @@ export async function loadReportAnalytics(
              SELECT candidate.price FROM (
                -- Market-linked instruments: market close only. Unlinked funds: hand/TEFAS price only.
                SELECT ip.price,ip.priced_at FROM investment_prices ip
-               WHERE ip.instrument_id=i.id AND i.market_symbol_id IS NULL AND ip.priced_at <= pos.bucket
+               WHERE ip.instrument_id=i.id AND i.market_symbol_id IS NULL AND ip.priced_at <= pos.bucket_end
                UNION ALL
                SELECT mp.close AS price,(mp.price_date::timestamp AT TIME ZONE 'Europe/Istanbul')
                FROM market_daily_prices mp WHERE mp.market_symbol_id=i.market_symbol_id
-                 AND mp.price_date<=(pos.bucket AT TIME ZONE 'Europe/Istanbul')::date
+                 AND mp.price_date<=(pos.bucket_end AT TIME ZONE 'Europe/Istanbul')::date
              ) candidate ORDER BY candidate.priced_at DESC LIMIT 1
            ) latest_price ON true
            LEFT JOIN LATERAL (
@@ -477,7 +483,9 @@ export async function loadReportAnalytics(
         // No position-quantity filter - the line runs from the window start so
         // the frontend can rebase it to 0% at period start.
         `WITH selected_accounts AS (${accountScope}), periods AS (
-           SELECT generate_series(date_trunc($6,$2::timestamptz),date_trunc($6,$3::timestamptz),$7::interval) bucket
+           -- bucket_end: see investmentValueSeries' periods CTE above.
+           SELECT bucket,LEAST(bucket+$7::interval,$3::timestamptz) bucket_end FROM
+             generate_series(date_trunc($6,$2::timestamptz),date_trunc($6,$3::timestamptz),$7::interval) bucket
          ), scoped_instruments AS (
            SELECT DISTINCT l.instrument_id
            FROM investment_lots l
@@ -494,12 +502,12 @@ export async function loadReportAnalytics(
          LEFT JOIN LATERAL (
            SELECT candidate.price FROM (
              SELECT ip.price,ip.priced_at FROM investment_prices ip
-             WHERE ip.instrument_id=i.id AND i.market_symbol_id IS NULL AND ip.priced_at <= p.bucket
+             WHERE ip.instrument_id=i.id AND i.market_symbol_id IS NULL AND ip.priced_at <= p.bucket_end
              UNION ALL
              SELECT mp.close,(mp.price_date::timestamp AT TIME ZONE 'Europe/Istanbul')
              FROM market_daily_prices mp
              WHERE mp.market_symbol_id=i.market_symbol_id
-               AND mp.price_date<=(p.bucket AT TIME ZONE 'Europe/Istanbul')::date
+               AND mp.price_date<=(p.bucket_end AT TIME ZONE 'Europe/Istanbul')::date
            ) candidate ORDER BY candidate.priced_at DESC LIMIT 1
          ) lp ON true
          ORDER BY si.instrument_id,p.bucket`,
@@ -513,7 +521,9 @@ export async function loadReportAnalytics(
         // the bucket, valued at the latest price x latest FX rate, exactly like
         // investmentValueSeries but grouped by the home account instead of summed.
         `WITH selected_accounts AS (${accountScope}), periods AS (
-           SELECT generate_series(date_trunc($6,$2::timestamptz),date_trunc($6,$3::timestamptz),$7::interval) bucket
+           -- bucket_end: see investmentValueSeries' periods CTE above.
+           SELECT bucket,LEAST(bucket+$7::interval,$3::timestamptz) bucket_end FROM
+             generate_series(date_trunc($6,$2::timestamptz),date_trunc($6,$3::timestamptz),$7::interval) bucket
          ), dominant AS (
            SELECT DISTINCT ON (agg.instrument_id) agg.instrument_id,agg.account_id
            FROM (
@@ -525,20 +535,20 @@ export async function loadReportAnalytics(
            ) agg
            ORDER BY agg.instrument_id,agg.qty DESC,agg.account_id
          ), purchased AS (
-           SELECT l.instrument_id,p.bucket,
-             SUM(l.quantity) FILTER (WHERE l.purchased_at <= p.bucket) qty,
-             SUM(l.quantity*l.unit_price) FILTER (WHERE l.purchased_at <= p.bucket) cost
+           SELECT l.instrument_id,p.bucket,p.bucket_end,
+             SUM(l.quantity) FILTER (WHERE l.purchased_at <= p.bucket_end) qty,
+             SUM(l.quantity*l.unit_price) FILTER (WHERE l.purchased_at <= p.bucket_end) cost
            FROM periods p CROSS JOIN investment_lots l
            WHERE l.book_id=$1 AND l.deleted_at IS NULL
-           GROUP BY l.instrument_id,p.bucket
+           GROUP BY l.instrument_id,p.bucket,p.bucket_end
          ), sold AS (
            SELECT s.instrument_id,p.bucket,
-             SUM(s.quantity) FILTER (WHERE s.sold_at <= p.bucket) qty
+             SUM(s.quantity) FILTER (WHERE s.sold_at <= p.bucket_end) qty
            FROM periods p CROSS JOIN investment_sales s
            WHERE s.book_id=$1 AND s.deleted_at IS NULL
            GROUP BY s.instrument_id,p.bucket
          ), positions AS (
-           SELECT pu.bucket,pu.instrument_id,d.account_id,
+           SELECT pu.bucket,pu.bucket_end,pu.instrument_id,d.account_id,
              GREATEST(COALESCE(pu.qty,0)-COALESCE(so.qty,0),0) net_qty,
              pu.qty AS purchased_qty,pu.cost AS purchased_cost
            FROM purchased pu
@@ -555,11 +565,11 @@ export async function loadReportAnalytics(
            LEFT JOIN LATERAL (
              SELECT candidate.price FROM (
                SELECT ip.price,ip.priced_at FROM investment_prices ip
-               WHERE ip.instrument_id=i.id AND i.market_symbol_id IS NULL AND ip.priced_at <= pos.bucket
+               WHERE ip.instrument_id=i.id AND i.market_symbol_id IS NULL AND ip.priced_at <= pos.bucket_end
                UNION ALL
                SELECT mp.close,(mp.price_date::timestamp AT TIME ZONE 'Europe/Istanbul')
                FROM market_daily_prices mp WHERE mp.market_symbol_id=i.market_symbol_id
-                 AND mp.price_date<=(pos.bucket AT TIME ZONE 'Europe/Istanbul')::date
+                 AND mp.price_date<=(pos.bucket_end AT TIME ZONE 'Europe/Istanbul')::date
              ) candidate ORDER BY candidate.priced_at DESC LIMIT 1
            ) latest_price ON true
            LEFT JOIN LATERAL (

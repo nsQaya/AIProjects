@@ -5,7 +5,7 @@ import type {
 } from "@defterx/contracts";
 import { describe, expect, it, vi } from "vitest";
 
-import { chooseComboboxOption } from "../../test/combobox";
+import { chooseComboboxOption, openCombobox } from "../../test/combobox";
 import { SettingsPage } from "./SettingsPage";
 import type { SettingsActions, SettingsViewModel } from "./settings-types";
 
@@ -492,7 +492,7 @@ describe("SettingsPage currency management",()=>{
     await user.click(screen.getByRole("button",{name:"+ Araç"}));
     await chooseComboboxOption(user,"Tür","Hisse");
     const currencyField=screen.getByLabelText("Para birimi");
-    await user.click(currencyField);
+    await openCombobox(user,currencyField);
     expect(
       within(screen.getByRole("listbox")).getAllByRole("option").map((option)=>option.textContent),
     ).toEqual(["TRY · TÜRK LİRASI", "USD · ABD DOLARI"]);

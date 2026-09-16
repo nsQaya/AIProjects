@@ -626,7 +626,6 @@
 
 /* Searchable select ------------------------------------------------------- */
 .searchable-select {
-  position: relative;
   width: 100%;
   max-width: 320px;
   min-width: 0;
@@ -637,30 +636,63 @@
   max-width: 100%;
 }
 
-.searchable-select::after {
-  content: "⌄";
-  position: absolute;
-  right: 12px;
-  top: 11px;
-  color: var(--muted);
-  pointer-events: none;
+.searchable-select-field {
+  position: relative;
 }
 
 .searchable-select-input {
   width: 100%;
   padding-right: 30px;
   text-overflow: ellipsis;
-  cursor: pointer;
 }
 
 .searchable-select-input:disabled {
+  opacity: .55;
+}
+
+/*
+ * The dropdown chevron used to be a decorative, non-interactive `::after` —
+ * tapping it just happened to land on the input underneath. It is now the
+ * real, documented react-aria toggle button (see the component), which is
+ * also the only reliable way to reopen the list once the field is already
+ * focused, so it needs an honest hit target, not a 12px glyph.
+ */
+.searchable-select-toggle {
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.searchable-select-toggle[data-hovered],
+.searchable-select-toggle[data-pressed] {
+  background: var(--green-soft);
+}
+
+.searchable-select-toggle[data-focus-visible] {
+  outline: 2px solid var(--forest-700);
+  outline-offset: -2px;
+}
+
+.searchable-select-toggle[data-disabled] {
   cursor: not-allowed;
   opacity: .55;
 }
 
 .searchable-select-menu {
-  position: fixed;
   z-index: 60;
+  width: var(--trigger-width);
   max-height: 260px;
   margin: 0;
   padding: 6px;
@@ -688,16 +720,21 @@
   cursor: pointer;
 }
 
-.searchable-select-option.is-active {
+.searchable-select-option[data-focused] {
   background: var(--green-soft);
 }
 
-.searchable-select-option[aria-selected="true"] {
+.searchable-select-option[data-focus-visible] {
+  outline: 2px solid var(--forest-700);
+  outline-offset: -2px;
+}
+
+.searchable-select-option[data-selected] {
   color: var(--forest-700);
   font-weight: 700;
 }
 
-.searchable-select-option.is-disabled {
+.searchable-select-option[data-disabled] {
   opacity: .5;
   cursor: not-allowed;
 }

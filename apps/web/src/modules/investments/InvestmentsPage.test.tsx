@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { isoAtLocalNoon } from "../../lib/date";
-import { chooseComboboxOption } from "../../test/combobox";
+import { chooseComboboxOption, openCombobox } from "../../test/combobox";
 import { InvestmentsPage } from ".";
 import type {
   InvestmentAccountOption,
@@ -372,12 +372,12 @@ describe("InvestmentsPage", () => {
     const dialog = await screen.findByRole("dialog", { name: "Satışı düzenle" });
     const saleInstrument = within(dialog).getByLabelText("Satılacak yatırım aracı");
     expect(saleInstrument).toHaveValue("Eski Fon (ESK)");
-    await user.click(saleInstrument);
+    await openCombobox(user, saleInstrument);
     expect(within(dialog).getByRole("option", { name: /Eski Fon.*Pasif/ })).toBeInTheDocument();
     await user.keyboard("{Escape}");
     const saleAccount = within(dialog).getByLabelText("Para hangi hesaba geçti?");
     expect(saleAccount).toHaveValue("Eski yatırım hesabı");
-    await user.click(saleAccount);
+    await openCombobox(user, saleAccount);
     expect(
       within(dialog).getByRole("option", { name: /Eski yatırım hesabı.*Arşivli/ }),
     ).toBeInTheDocument();

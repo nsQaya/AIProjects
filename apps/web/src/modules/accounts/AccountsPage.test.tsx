@@ -4,7 +4,7 @@ import type { AccountTypeDTO } from "@defterx/contracts";
 
 import { AccountsPage, type AccountSharingApi, type AccountViewModel } from ".";
 import type { SharedAccountView } from "../../finance/finance-views";
-import { chooseComboboxOption } from "../../test/combobox";
+import { chooseComboboxOption, openCombobox } from "../../test/combobox";
 
 const bankType: AccountTypeDTO = {
   id: "type-bank",
@@ -328,7 +328,7 @@ describe("AccountsPage", () => {
     await user.click(screen.getByRole("button", { name: "+ Hesap ekle" }));
     const dialog = await screen.findByRole("dialog", { name: "Hesap ekle" });
     const currency = within(dialog).getByLabelText(/Para birimi/);
-    await user.click(currency);
+    await openCombobox(user, currency);
     expect(screen.queryByRole("option", { name: /Euro/ })).not.toBeInTheDocument();
     expect(screen.getByRole("option", { name: /ABD Doları/ })).toBeInTheDocument();
     await user.keyboard("{Escape}");
