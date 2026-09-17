@@ -81,6 +81,7 @@ function SettingsGroup({
 
   return (
     <details
+      id={`settings-group-${id}`}
       className="settings-group"
       open={open}
       onToggle={(event) => {

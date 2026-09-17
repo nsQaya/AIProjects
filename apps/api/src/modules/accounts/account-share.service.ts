@@ -116,7 +116,17 @@ export async function revokeAccountShare(
   shareId: string,
 ) {
   return inTransaction(client, async (transaction) => {
-    const account = await assertAccountAccess(transaction, accountId, actorId, "MANAGE");
+    const share = await transaction.query<{ grantee_user_id: string; book_id: string }>(
+      `SELECT grantee_user_id,book_id FROM account_shares WHERE id=$1 AND account_id=$2 AND deleted_at IS NULL`,
+      [shareId, accountId],
+    );
+    const shareRow = share.rows[0];
+    if (!shareRow) throw new AppError(404, "SHARE_NOT_FOUND", "Share was not found");
+    // The owner (MANAGE) can revoke any share on their account; a grantee may
+    // always end their own share, even without owning the account.
+    if (shareRow.grantee_user_id !== actorId) {
+      await assertAccountAccess(transaction, accountId, actorId, "MANAGE");
+    }
     const result = await transaction.query<{ id: string; version: number }>(
       `UPDATE account_shares SET status='REVOKED',deleted_at=now(),updated_at=now(),version=version+1
        WHERE id=$1 AND account_id=$2 AND deleted_at IS NULL
@@ -124,7 +134,7 @@ export async function revokeAccountShare(
       [shareId, accountId],
     );
     if (!result.rows[0]) throw new AppError(404, "SHARE_NOT_FOUND", "Share was not found");
-    await audit(transaction, account.bookId, actorId, shareId, "REVOKE", result.rows[0]);
+    await audit(transaction, shareRow.book_id, actorId, shareId, "REVOKE", result.rows[0]);
     return { id: result.rows[0].id, status: "REVOKED" as const, version: result.rows[0].version };
   });
 }

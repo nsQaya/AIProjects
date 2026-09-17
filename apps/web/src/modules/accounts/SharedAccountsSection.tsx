@@ -13,11 +13,35 @@ interface SharedAccountsSectionProps {
   accounts: readonly SharedAccountView[];
   sharing: AccountSharingApi;
   busy?: boolean;
+  confirmLeave?: (account: SharedAccountView) => boolean | Promise<boolean>;
 }
 
-export function SharedAccountsSection({ accounts, sharing, busy = false }: SharedAccountsSectionProps) {
+export function SharedAccountsSection({
+  accounts,
+  sharing,
+  busy = false,
+  confirmLeave = (account) =>
+    globalThis.confirm(`“${account.name}” hesabının paylaşımını durdurmak istediğine emin misin?`),
+}: SharedAccountsSectionProps) {
   const [ledgerAccount, setLedgerAccount] = useState<SharedAccountView | null>(null);
   const [postingAccount, setPostingAccount] = useState<SharedAccountView | null>(null);
+  const [leavingShareId, setLeavingShareId] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState("");
+
+  const leaveShare = async (account: SharedAccountView) => {
+    if (busy || leavingShareId !== null) return;
+    if (!(await confirmLeave(account))) return;
+
+    setFeedback("");
+    setLeavingShareId(account.shareId);
+    try {
+      await sharing.revokeShare(account.id, account.shareId);
+    } catch (error) {
+      setFeedback(errorMessage(error));
+    } finally {
+      setLeavingShareId(null);
+    }
+  };
 
   if (accounts.length === 0) return null;
 
@@ -29,6 +53,8 @@ export function SharedAccountsSection({ accounts, sharing, busy = false }: Share
           <span>Başka kullanıcıların sana açtığı hesaplar. Kendi toplamlarına dâhil değildir.</span>
         </div>
       </div>
+
+      {feedback ? <InlineFeedback tone="error">{feedback}</InlineFeedback> : null}
 
       <div className="account-grid">
         {accounts.map((account) => {
@@ -76,6 +102,14 @@ export function SharedAccountsSection({ accounts, sharing, busy = false }: Share
                     İşlem ekle
                   </button>
                 ) : null}
+                <button
+                  type="button"
+                  className="danger-link"
+                  disabled={busy || leavingShareId !== null}
+                  onClick={() => void leaveShare(account)}
+                >
+                  {leavingShareId === account.shareId ? "İşleniyor…" : "Paylaşımı durdur"}
+                </button>
               </span>
               <div className="account-line"><span /></div>
             </article>

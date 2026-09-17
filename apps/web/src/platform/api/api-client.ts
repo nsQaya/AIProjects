@@ -10,6 +10,7 @@ import {
   type ForgotPasswordResponse,
   type LoginInput,
   type LoginResponse,
+  type OnboardingPageKey,
   type RefreshResponse,
   type RegisterInput,
   type RegisterResponse,
@@ -178,6 +179,27 @@ export class APIClient {
       schema: refreshResponseSchema,
     });
     this.setSession({ ...current, ...tokens, user: current.user });
+  }
+
+  async completeOnboarding(): Promise<void> {
+    const current = this.#session;
+    if (!current) return;
+
+    const data = await this.request<{ onboardingCompletedAt: string }>("/api/v1/me/onboarding", {
+      method: "PATCH",
+    });
+    this.setSession({ ...current, user: { ...current.user, onboardingCompletedAt: data.onboardingCompletedAt } });
+  }
+
+  async completePageTour(page: OnboardingPageKey): Promise<void> {
+    const current = this.#session;
+    if (!current) return;
+
+    const data = await this.request<{ onboardingPagesCompleted: string[] }>("/api/v1/me/onboarding/pages", {
+      method: "PATCH",
+      body: { page },
+    });
+    this.setSession({ ...current, user: { ...current.user, onboardingPagesCompleted: data.onboardingPagesCompleted } });
   }
 
   async logout(): Promise<void> {

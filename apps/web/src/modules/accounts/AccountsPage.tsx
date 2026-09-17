@@ -27,7 +27,11 @@ export function AccountsPage({
   currencies = [],
   busy = false,
   confirmDelete = (account) =>
-    globalThis.confirm(`“${account.name}” hesabı silinsin mi? Kullanılmışsa arşivlenecektir.`),
+    globalThis.confirm(
+      account.isArchived
+        ? `“${account.name}” hesabı tekrar silinsin mi? İlişkili işlem kalmadıysa kalıcı olarak silinecek, aksi halde arşivli kalmaya devam edecektir.`
+        : `“${account.name}” hesabı silinsin mi? Kullanılmışsa arşivlenecektir.`,
+    ),
   sharing,
   onCreateAccount,
   onDeleteAccount,
@@ -42,7 +46,7 @@ export function AccountsPage({
     .reduce((sum, account) => sum + toNumber(account.displayBalanceTry), 0);
 
   const deleteAccount = async (account: AccountViewModel) => {
-    if (account.isArchived || busy || deletingAccountId !== null) return;
+    if (busy || deletingAccountId !== null) return;
     if (!(await confirmDelete(account))) return;
 
     setPageFeedback("");
@@ -119,15 +123,11 @@ export function AccountsPage({
                     <button
                       className="danger-link"
                       data-delete-account={account.id}
-                      disabled={account.isArchived || busy || deletingAccountId !== null}
+                      disabled={busy || deletingAccountId !== null}
                       type="button"
                       onClick={() => void deleteAccount(account)}
                     >
-                      {account.isArchived
-                        ? "Arşivli"
-                        : deletingAccountId === account.id
-                          ? "İşleniyor…"
-                          : "Sil"}
+                      {deletingAccountId === account.id ? "İşleniyor…" : "Sil"}
                     </button>
                   </span>
                 </div>

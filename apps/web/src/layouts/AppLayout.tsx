@@ -5,6 +5,7 @@ import { Button, Icon, IconButton, ScrollToTopButton, type IconName } from "../c
 import type { HealthStatus } from "../platform/api/api-client";
 import type { AuthUser } from "../platform/auth/auth-schemas";
 import { routeForPath, routes } from "../application/route-meta";
+import { OnboardingTour } from "./OnboardingTour";
 
 interface AppLayoutProps {
   apiStatus: HealthStatus | null;
@@ -13,7 +14,9 @@ interface AppLayoutProps {
   children: ReactNode;
   onLogout: () => Promise<void>;
   onNewTransaction: () => void;
+  onOnboardingTourFinish?: () => void;
   onSync: () => Promise<void>;
+  showOnboardingTour?: boolean;
   transactionDialog?: ReactNode;
   user: AuthUser;
 }
@@ -31,7 +34,9 @@ export function AppLayout({
   children,
   onLogout,
   onNewTransaction,
+  onOnboardingTourFinish,
   onSync,
+  showOnboardingTour = false,
   transactionDialog,
   user,
 }: AppLayoutProps) {
@@ -134,6 +139,7 @@ export function AppLayout({
         <Icon name="plus" />
       </Button>
       <ScrollToTopButton />
+      <OnboardingTour active={showOnboardingTour} onFinish={onOnboardingTourFinish ?? (() => {})} />
       {transactionDialog}
     </>
   );

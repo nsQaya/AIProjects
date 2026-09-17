@@ -6,11 +6,16 @@ import type {
   ResetPasswordRequest,
 } from "@defterx/contracts";
 
+export const onboardingPageKeys = ["transactions", "accounts", "savings", "upcoming", "reports", "settings"] as const;
+export type OnboardingPageKey = (typeof onboardingPageKeys)[number];
+
 export const authUserSchema = z
   .object({
     id: z.string().min(1),
     email: z.string().email(),
     displayName: z.string(),
+    onboardingCompletedAt: z.string().nullable().optional(),
+    onboardingPagesCompleted: z.array(z.string()).optional(),
   })
   .passthrough();
 

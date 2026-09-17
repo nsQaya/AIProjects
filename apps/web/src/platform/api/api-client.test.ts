@@ -65,6 +65,36 @@ describe("APIClient auth lifecycle", () => {
     expect(save).toHaveBeenCalledWith(client.session);
   });
 
+  it("stores the returned completion timestamp on the session's user after marking onboarding complete", async () => {
+    const { store, save } = createSessionStore();
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({ onboardingCompletedAt: "2026-09-16T12:00:00.000Z" }),
+    );
+    const client = new APIClient("https://api.example.test", store, { fetch: fetchMock });
+
+    await client.completeOnboarding();
+
+    expect(client.session).toEqual({
+      ...initialSession,
+      user: { ...initialSession.user, onboardingCompletedAt: "2026-09-16T12:00:00.000Z" },
+    });
+    expect(save).toHaveBeenCalledWith(client.session);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/api/v1/me/onboarding",
+      expect.objectContaining({ method: "PATCH" }),
+    );
+  });
+
+  it("does nothing when completing onboarding without a session", async () => {
+    const { store } = createSessionStore(null);
+    const fetchMock = vi.fn<typeof fetch>();
+    const client = new APIClient("https://api.example.test", store, { fetch: fetchMock });
+
+    await client.completeOnboarding();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("shares one refresh request across simultaneous 401 responses", async () => {
     let resolveRefresh!: (response: Response) => void;
     const refreshResponse = new Promise<Response>((resolve) => {

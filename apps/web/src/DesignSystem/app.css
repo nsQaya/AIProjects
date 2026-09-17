@@ -117,7 +117,7 @@ select { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .intro-actions { display: flex; gap: 8px; }
 .account-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
 .account-card { min-height: 215px; padding: 22px; position: relative; overflow: hidden; display: grid; align-content: space-between; border: 1px solid var(--line); border-radius: var(--radius-md); background: white; box-shadow: var(--shadow); }
-.account-card::after { content: ""; position: absolute; width: 150px; height: 150px; right: -55px; bottom: -70px; border: 25px solid color-mix(in srgb, var(--account) 9%, transparent); border-radius: 50%; }
+.account-card::after { content: ""; position: absolute; width: 150px; height: 150px; right: -55px; bottom: -70px; border: 25px solid color-mix(in srgb, var(--account) 9%, transparent); border-radius: 50%; pointer-events: none; }
 .account-top { display: flex; justify-content: space-between; }.account-top button { border: 0; background: transparent; color: var(--muted); }
 .account-symbol { width: 40px; height: 40px; display: grid; place-items: center; color: var(--account); background: color-mix(in srgb, var(--account) 12%, white); border-radius: 12px; font-size: 18px; }
 .account-card small { color: var(--muted); }.account-card h3 { margin-top: 4px; font-family: Georgia, serif; font-size: 19px; }.account-card strong { font-family: Georgia, serif; font-size: 26px; }

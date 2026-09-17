@@ -1,6 +1,8 @@
 import { useState } from "react";
 
 import type { ScheduledTransactionView } from "../../finance";
+import { PageTour } from "../../layouts/PageTour";
+import { UPCOMING_PAGE_TOUR } from "../../layouts/page-tours";
 import { TransactionDialog } from "../../modules/transactions/TransactionDialog";
 import { ScheduledDialog } from "../../modules/upcoming/ScheduledDialog";
 import type { ScheduledDraft } from "../../modules/upcoming/scheduled-types";
@@ -45,6 +47,7 @@ export function UpcomingRoute() {
 
   return (
     <>
+      <PageTour page="upcoming" steps={UPCOMING_PAGE_TOUR} />
       <UpcomingPage
         accounts={snapshot.accounts}
         items={snapshot.upcoming}

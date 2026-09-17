@@ -287,8 +287,15 @@ export async function deleteOrArchiveAccount(client: DbClient, userId: string, a
     const account = found.rows[0];
     if (!account) throw new AppError(404, "ACCOUNT_NOT_FOUND", "Account was not found");
     if (account.is_system) throw new AppError(409, "SYSTEM_ACCOUNT_IMMUTABLE", "System accounts cannot be deleted");
+    // Opening-balance postings and reversed/cancelled activity are not real transactions
+    // from the user's point of view, so they don't block a hard delete: an account with
+    // only those should be removable outright, and one that's archived should become
+    // deletable again once its real transactions are reversed.
     const used = await transaction.query(
-      `SELECT 1 FROM transaction_entries WHERE account_id=$1
+      `SELECT 1 FROM transaction_entries e
+       JOIN transactions t ON t.id=e.transaction_id
+       WHERE e.account_id=$1 AND t.deleted_at IS NULL AND t.status='POSTED'
+         AND t.transaction_type NOT IN ('OPENING_BALANCE','REVERSAL')
        UNION ALL SELECT 1 FROM investment_lots WHERE account_id=$1 AND deleted_at IS NULL LIMIT 1`,
       [accountId],
     );

@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import type { InvestmentValueSeriesItemDTO } from "@defterx/contracts";
 
 import { cashFlowWindow, type CashFlowRange } from "../../finance";
+import { PageTour } from "../../layouts/PageTour";
+import { SAVINGS_PAGE_TOUR } from "../../layouts/page-tours";
 import { SavingsPage } from "../../modules/investments";
 import { useFinance } from "../../providers/FinanceProvider";
 
@@ -71,6 +73,8 @@ export function InvestmentsRoute() {
   }, [service, valueHistoryRange]);
 
   return (
+    <>
+    <PageTour page="savings" steps={SAVINGS_PAGE_TOUR} />
     <SavingsPage
       accounts={accountOptions}
       brokerageAccounts={snapshot.brokerageAccounts}
@@ -118,5 +122,6 @@ export function InvestmentsRoute() {
         mutate(() => service.createFxConversion(values), "Döviz işlemi kaydedildi.")
       }
     />
+    </>
   );
 }

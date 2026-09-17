@@ -13,6 +13,7 @@ import type {
   ChangePasswordInput,
   ForgotPasswordInput,
   LoginInput,
+  OnboardingPageKey,
   RegisterInput,
   ResetPasswordInput,
 } from "../platform/auth/auth-schemas";
@@ -28,6 +29,8 @@ interface AuthContextValue {
   changePassword: (input: ChangePasswordInput) => Promise<void>;
   logout: () => Promise<void>;
   invalidateSession: () => void;
+  completeOnboarding: () => Promise<void>;
+  completePageTour: (page: OnboardingPageKey) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -88,12 +91,27 @@ export function AuthProvider({ api, children }: { api: APIClient; children: Reac
     setSession(null);
   }, [api]);
 
+  const completeOnboarding = useCallback(async () => {
+    await api.completeOnboarding();
+    setSession(api.session);
+  }, [api]);
+
+  const completePageTour = useCallback(
+    async (page: OnboardingPageKey) => {
+      await api.completePageTour(page);
+      setSession(api.session);
+    },
+    [api],
+  );
+
   const value = useMemo<AuthContextValue>(
     () => ({
       api,
       session,
       authenticated: session !== null,
       changePassword,
+      completeOnboarding,
+      completePageTour,
       forgotPassword,
       login,
       register,
@@ -104,6 +122,8 @@ export function AuthProvider({ api, children }: { api: APIClient; children: Reac
     [
       api,
       changePassword,
+      completeOnboarding,
+      completePageTour,
       forgotPassword,
       invalidateSession,
       login,

@@ -1,4 +1,6 @@
 import type { TransactionView } from "../../finance";
+import { PageTour } from "../../layouts/PageTour";
+import { TRANSACTIONS_PAGE_TOUR } from "../../layouts/page-tours";
 import { TransactionsPage } from "../../modules/transactions/TransactionsPage";
 import { useFinance } from "../../providers/FinanceProvider";
 import { useToast } from "../ToastProvider";
@@ -8,6 +10,8 @@ export function TransactionsRoute({ onEdit }: { onEdit: (transaction: Transactio
   const { showToast } = useToast();
 
   return (
+    <>
+    <PageTour page="transactions" steps={TRANSACTIONS_PAGE_TOUR} />
     <TransactionsPage
       accounts={snapshot.accounts}
       categories={snapshot.categories}
@@ -28,5 +32,6 @@ export function TransactionsRoute({ onEdit }: { onEdit: (transaction: Transactio
         mutate(() => service.createFxConversion(values), "Döviz işlemi kaydedildi.")
       }
     />
+    </>
   );
 }

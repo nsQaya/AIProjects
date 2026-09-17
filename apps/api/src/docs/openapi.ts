@@ -59,6 +59,10 @@ paths:
     get: { summary: Current user, responses: { '200': { description: User } } }
   /me/password:
     patch: { summary: Change password and rotate all refresh sessions, responses: { '200': { description: Fresh tokens }, '401': { description: Current password is incorrect } } }
+  /me/onboarding:
+    patch: { summary: Mark the product tour as completed (idempotent), responses: { '200': { description: Onboarding marked complete } } }
+  /me/onboarding/pages:
+    patch: { summary: Mark a single page's content tour as seen (idempotent), responses: { '200': { description: Page tour marked complete }, '422': { description: Unknown page key } } }
   /books:
     get: { summary: List books, responses: { '200': { description: Books } } }
     post: { summary: Create book, responses: { '201': { description: Created } } }

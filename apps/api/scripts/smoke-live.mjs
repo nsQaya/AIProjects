@@ -32,6 +32,35 @@ if (registration.response.headers.get("access-control-allow-origin") !== webOrig
 }
 
 const authorization = { Authorization: `Bearer ${registration.payload.accessToken}` };
+
+// Onboarding tour: a fresh account starts unmarked, /me/onboarding marks it
+// complete (idempotently), and the completion sticks on the user's profile.
+if (registration.payload.user.onboardingCompletedAt !== null) throw new Error(`Fresh account should start with onboardingCompletedAt null: ${registration.payload.user.onboardingCompletedAt}`);
+const onboardingCompletion = (await request("/api/v1/me/onboarding", { method: "PATCH", headers: authorization })).payload;
+if (!onboardingCompletion.onboardingCompletedAt) throw new Error("Marking onboarding complete did not return a timestamp");
+const onboardingRepeat = (await request("/api/v1/me/onboarding", { method: "PATCH", headers: authorization })).payload;
+if (onboardingRepeat.onboardingCompletedAt !== onboardingCompletion.onboardingCompletedAt) throw new Error("Repeating the onboarding completion changed the stored timestamp");
+const profileAfterOnboarding = (await request("/api/v1/me", { headers: authorization })).payload;
+if (profileAfterOnboarding.onboardingCompletedAt !== onboardingCompletion.onboardingCompletedAt) throw new Error("Onboarding completion was not visible on the current-user profile");
+
+// Page tours: each page's own content tour is tracked separately, is
+// idempotent per page, and doesn't affect other pages' completion.
+if (!Array.isArray(registration.payload.user.onboardingPagesCompleted) || registration.payload.user.onboardingPagesCompleted.length !== 0) {
+  throw new Error(`Fresh account should start with no page tours completed: ${JSON.stringify(registration.payload.user.onboardingPagesCompleted)}`);
+}
+const pageTourFirst = (await request("/api/v1/me/onboarding/pages", { method: "PATCH", headers: authorization, body: JSON.stringify({ page: "transactions" }) })).payload;
+if (!pageTourFirst.onboardingPagesCompleted.includes("transactions")) throw new Error("Marking a page tour complete did not record it");
+const pageTourRepeat = (await request("/api/v1/me/onboarding/pages", { method: "PATCH", headers: authorization, body: JSON.stringify({ page: "transactions" }) })).payload;
+if (pageTourRepeat.onboardingPagesCompleted.length !== 1) throw new Error(`Repeating a page tour completion duplicated it: ${JSON.stringify(pageTourRepeat.onboardingPagesCompleted)}`);
+const pageTourSecond = (await request("/api/v1/me/onboarding/pages", { method: "PATCH", headers: authorization, body: JSON.stringify({ page: "reports" }) })).payload;
+if (pageTourSecond.onboardingPagesCompleted.length !== 2 || !pageTourSecond.onboardingPagesCompleted.includes("reports")) {
+  throw new Error(`Second page tour did not add alongside the first: ${JSON.stringify(pageTourSecond.onboardingPagesCompleted)}`);
+}
+const rejectedPageTour = await fetch(`${apiBaseUrl}/api/v1/me/onboarding/pages`, {
+  method: "PATCH", headers: { Origin: webOrigin, "Content-Type": "application/json", Authorization: authorization.Authorization },
+  body: JSON.stringify({ page: "not-a-real-page" }),
+});
+if (rejectedPageTour.status !== 422) throw new Error(`Unknown page key should be rejected with 422, received ${rejectedPageTour.status}`);
 const book = (await request("/api/v1/books", {
   method: "POST", headers: authorization,
   body: JSON.stringify({ name: `Smoke Test ${runId}`, bookType: "PERSONAL", baseCurrency: "TRY" })
@@ -216,8 +245,9 @@ const blockedGranteeTransfer=await fetch(`${apiBaseUrl}/api/v1/transactions`,{me
 if(blockedGranteeTransfer.status!==403)throw new Error(`Grantee transfer should be 403, received ${blockedGranteeTransfer.status}`);
 await request(`/api/v1/transactions/${granteeExpense.id}/reverse?bookId=${book.id}`,{method:"POST",headers:{...granteeAuth,"Idempotency-Key":randomUUID()},body:JSON.stringify({clientOperationId:randomUUID(),reason:"Grantee reversal smoke"})});
 if(Number((await request(`/api/v1/accounts/${account.id}/balance`,{headers:authorization})).payload.balance)!==874.5)throw new Error("Grantee could not reverse their own posting");
-const revokedShare=(await request(`/api/v1/accounts/${account.id}/shares/${accountShare.id}`,{method:"DELETE",headers:authorization})).payload;
-if(revokedShare.status!=="REVOKED")throw new Error("Account share revoke failed");
+// A grantee may end their own share even without owning the account.
+const revokedShare=(await request(`/api/v1/accounts/${account.id}/shares/${accountShare.id}`,{method:"DELETE",headers:granteeAuth})).payload;
+if(revokedShare.status!=="REVOKED")throw new Error("Grantee self-revoke of their own share failed");
 sharedWithGrantee=(await request(`/api/v1/accounts/shared-with-me?_=${Date.now()}`,{headers:granteeAuth})).payload;
 if(sharedWithGrantee.items.some((item)=>item.id===account.id))throw new Error("Revoked share is still visible to the grantee");
 const deniedAfterRevoke=await fetch(`${apiBaseUrl}/api/v1/accounts/${account.id}/balance`,{headers:{Origin:webOrigin,Authorization:granteeAuth.Authorization}});
@@ -294,6 +324,8 @@ console.log(JSON.stringify({
   bookId: book.id,
   transactionId: transaction.id,
   idempotency: "passed",
+  onboardingTour: "passed",
+  onboardingPageTours: "passed",
   ledgerBalance: balance.balance,
   dashboardExpense: dashboard.month.expense,
   cashflow: "passed",

@@ -9,6 +9,8 @@ import { TransactionDialog } from "../modules/transactions/TransactionDialog";
 import type { TransactionDraft } from "../modules/transactions/transaction-types";
 import { useFinance } from "../providers/FinanceProvider";
 import { errorMessage } from "../lib/error-message";
+import { PageTour } from "../layouts/PageTour";
+import { REPORTS_PAGE_TOUR } from "../layouts/page-tours";
 import { useToast } from "./ToastProvider";
 import { AccountsRoute } from "./routes/AccountsRoute";
 import { DashboardRoute } from "./routes/DashboardRoute";
@@ -22,12 +24,19 @@ const ReportsPage = lazy(() =>
 );
 
 export function AuthenticatedApp() {
-  const { logout, session } = useAuth();
+  const { completeOnboarding, logout, session } = useAuth();
   const { showToast } = useToast();
   const { apiStatus, initializationError, mutate, mutationBusy, refresh, service, snapshot } = useFinance();
   const [transactionEditor, setTransactionEditor] = useState<TransactionView | null | undefined>();
+  const [tourDismissedLocally, setTourDismissedLocally] = useState(false);
 
   if (!session) return null;
+
+  const showOnboardingTour = !tourDismissedLocally && !session.user.onboardingCompletedAt;
+  const finishOnboardingTour = () => {
+    setTourDismissedLocally(true);
+    void completeOnboarding().catch(() => {});
+  };
 
   const saveTransaction = async (draft: TransactionDraft, transaction: TransactionView | null) => {
     if (transaction) {
@@ -58,6 +67,7 @@ export function AuthenticatedApp() {
         path="/reports"
         element={(
           <Suspense fallback={<LoadingState />}>
+            <PageTour page="reports" steps={REPORTS_PAGE_TOUR} />
             <ReportsPage
               accounts={snapshot.accounts}
               analytics={snapshot.reportAnalytics}
@@ -83,7 +93,9 @@ export function AuthenticatedApp() {
       user={session.user}
       onLogout={logout}
       onNewTransaction={() => setTransactionEditor(null)}
+      onOnboardingTourFinish={finishOnboardingTour}
       onSync={refresh}
+      showOnboardingTour={showOnboardingTour}
       transactionDialog={
         transactionEditor !== undefined ? (
           <TransactionDialog

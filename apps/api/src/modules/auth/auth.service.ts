@@ -6,7 +6,7 @@ import type { PasswordResetMailer } from "../../config/bindings";
 import type { DbClient } from "../../infrastructure/database";
 import { createBookWithClient } from "../books/book.service";
 
-interface UserRow { id: string; email: string; display_name: string }
+interface UserRow { id: string; email: string; display_name: string; onboarding_completed_at: Date | null; onboarding_pages_completed: string[] }
 interface RefreshRow { id: string; user_id: string; family_id: string; revoked_at: Date | null; expires_at: Date; email: string }
 interface PasswordResetRow { id: string; user_id: string; email: string; new_password_matches: boolean }
 interface PasswordCredentialRow { id: string; email: string; current_password_matches: boolean; new_password_matches: boolean }
@@ -68,7 +68,13 @@ export async function register(pool: DbClient, env: Env, input: { email: string;
       await client.query(`INSERT INTO auth_credentials(user_id,password_hash) VALUES($1,$2)`, [user.id, passwordHash]);
       const book = await createBookWithClient(client,user.id,{name:"Kişisel Defter",bookType:"PERSONAL",baseCurrency:"TRY"});
       const tokens = await issueTokens(client, user, env);
-      return { user: { id: user.id, email: user.email, displayName: user.display_name }, book, accessToken: tokens.accessToken, refreshToken: tokens.refreshToken, expiresIn: tokens.expiresIn };
+      return {
+        user: { id: user.id, email: user.email, displayName: user.display_name, onboardingCompletedAt: null, onboardingPagesCompleted: [] },
+        book,
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        expiresIn: tokens.expiresIn,
+      };
     });
   } catch (error) {
     if (error instanceof AppError) throw error;
@@ -79,28 +85,45 @@ export async function register(pool: DbClient, env: Env, input: { email: string;
 }
 
 export async function login(pool: DbClient, env: Env, input: { email: string; password: string }) {
-  // MATERIALIZED forces Postgres to resolve the (indexed, ≤1-row) email lookup
-  // before joining to auth_credentials — otherwise the planner sometimes picks
-  // a join order that runs the expensive crypt() comparison once per row of a
-  // near-cross-join between users and auth_credentials instead of once for the
-  // matched user, turning a sub-millisecond lookup into a multi-second (or
-  // worse) one that trips statement_timeout. Seen in production for freshly
-  // registered accounts (login.analytics-unrelated planner quirk, not data
-  // corruption) — see defterx-login-crypt-join-order memory.
-  const result = await pool.query<UserRow>(
-    `WITH matched_user AS MATERIALIZED (
-       SELECT id,email,display_name FROM users
-       WHERE lower(email)=lower($1) AND status='ACTIVE' AND deleted_at IS NULL
-     )
-     SELECT u.id,u.email,u.display_name FROM matched_user u JOIN auth_credentials c ON c.user_id=u.id
-     WHERE c.password_hash=crypt(encode(digest($2::text, 'sha256'), 'base64'), c.password_hash)`,
-    [input.email, input.password],
+  // Two point-lookups, not a join: for some parameter values Postgres's planner
+  // costs the users/auth_credentials join as a near-cross-join — evaluating the
+  // expensive, non-indexable crypt() comparison once per row of auth_credentials
+  // (seen in production taking 30+ seconds and tripping statement_timeout for
+  // freshly registered accounts) instead of once for the matched user. A single
+  // join query stayed vulnerable to this even with a MATERIALIZED CTE forcing
+  // the email lookup first, because the planner still chose a non-indexed scan
+  // for the auth_credentials side. Splitting into two queries, each a plain
+  // equality lookup on its own unique index (users.email, then
+  // auth_credentials.user_id), gives the planner no join to mis-cost — see
+  // defterx-login-crypt-join-order memory.
+  const userResult = await pool.query<UserRow>(
+    `SELECT id,email,display_name,onboarding_completed_at,onboarding_pages_completed FROM users WHERE lower(email)=lower($1) AND status='ACTIVE' AND deleted_at IS NULL`,
+    [input.email],
   );
-  const user = result.rows[0];
+  const candidate = userResult.rows[0];
+  const credentialResult = candidate
+    ? await pool.query<{ matches: boolean }>(
+        `SELECT password_hash=crypt(encode(digest($1::text, 'sha256'), 'base64'), password_hash) AS matches
+         FROM auth_credentials WHERE user_id=$2`,
+        [input.password, candidate.id],
+      )
+    : undefined;
+  const user = candidate && credentialResult?.rows[0]?.matches ? candidate : undefined;
   if (!user) throw new AppError(401, "INVALID_CREDENTIALS", "Email or password is incorrect");
   return inTransaction(pool, async (client) => {
     const tokens = await issueTokens(client, user, env);
-    return { user: { id: user.id, email: user.email, displayName: user.display_name }, accessToken: tokens.accessToken, refreshToken: tokens.refreshToken, expiresIn: tokens.expiresIn };
+    return {
+      user: {
+        id: user.id,
+        email: user.email,
+        displayName: user.display_name,
+        onboardingCompletedAt: user.onboarding_completed_at ? user.onboarding_completed_at.toISOString() : null,
+        onboardingPagesCompleted: user.onboarding_pages_completed,
+      },
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      expiresIn: tokens.expiresIn,
+    };
   });
 }
 

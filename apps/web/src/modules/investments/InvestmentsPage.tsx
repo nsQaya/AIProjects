@@ -293,7 +293,7 @@ export function InvestmentsPage({
         </div>
       </article>
 
-      <article className="panel transaction-panel">
+      <article id="investment-lots-panel" className="panel transaction-panel">
         <header className="panel-head">
           <div>
             <h2>Alımlar ve sermaye artışları</h2>

@@ -7,6 +7,8 @@ export interface UserDTO {
   id: UUID;
   email: string;
   displayName: string;
+  onboardingCompletedAt: ISODateTimeString | null;
+  onboardingPagesCompleted: string[];
 }
 
 export interface CurrentUserDTO extends UserDTO {
@@ -69,3 +71,9 @@ export interface ForgotPasswordResponse {
 export type ResetPasswordResponse = void;
 export type ChangePasswordResponse = AuthTokensDTO;
 export type CurrentUserResponse = CurrentUserDTO;
+export interface CompleteOnboardingResponse {
+  onboardingCompletedAt: ISODateTimeString;
+}
+export interface CompletePageTourResponse {
+  onboardingPagesCompleted: string[];
+}

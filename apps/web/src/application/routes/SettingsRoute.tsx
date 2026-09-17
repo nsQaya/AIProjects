@@ -1,4 +1,6 @@
 import { useAuth } from "../../auth/AuthProvider";
+import { PageTour } from "../../layouts/PageTour";
+import { SETTINGS_PAGE_TOUR } from "../../layouts/page-tours";
 import { isoAtLocalNoon } from "../../lib/date";
 import { SettingsPage, type SettingsActions } from "../../modules/settings";
 import { Configuration } from "../../platform/config/runtime-config";
@@ -187,6 +189,8 @@ export function SettingsRoute() {
   };
 
   return (
+    <>
+    <PageTour page="settings" steps={SETTINGS_PAGE_TOUR} />
     <SettingsPage
       actions={actions}
       model={{
@@ -202,5 +206,6 @@ export function SettingsRoute() {
         user: snapshot.user,
       }}
     />
+    </>
   );
 }

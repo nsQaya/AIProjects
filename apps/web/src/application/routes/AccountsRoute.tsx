@@ -1,5 +1,7 @@
 import { useMemo } from "react";
 
+import { PageTour } from "../../layouts/PageTour";
+import { ACCOUNTS_PAGE_TOUR } from "../../layouts/page-tours";
 import { useFinance } from "../../providers/FinanceProvider";
 import { AccountsPage } from "../../modules/accounts";
 import type { AccountSharingApi } from "../../modules/accounts";
@@ -40,6 +42,8 @@ export function AccountsRoute() {
   );
 
   return (
+    <>
+    <PageTour page="accounts" steps={ACCOUNTS_PAGE_TOUR} />
     <AccountsPage
       accounts={snapshot.accounts}
       accountTypes={snapshot.accountTypes.filter((accountType) => accountType.isActive)}
@@ -59,5 +63,6 @@ export function AccountsRoute() {
         mutate(() => service.deleteAccount(id, version), "Hesap silindi veya arşivlendi.")
       }
     />
+    </>
   );
 }
