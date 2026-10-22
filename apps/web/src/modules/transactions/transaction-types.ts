@@ -12,6 +12,10 @@ export interface TransactionDraft {
   categoryId?: UUID;
   costCenterId?: UUID;
   transactionDate: string;
+  /** Card purchase split into N installments (2-36). Only meaningful for a brand-new EXPENSE. */
+  installmentCount?: number;
+  /** Account that will pay each installment. Required when installmentCount is set. */
+  fundingAccountId?: UUID;
 }
 
 /** Seeds the "new transaction" form (e.g. when realizing a scheduled plan). Ignored when `transaction` is set. */

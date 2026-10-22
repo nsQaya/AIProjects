@@ -4,7 +4,15 @@ import type { IncomeExpenseCostCenterItemDTO, ReportAnalyticsResponse } from "@d
 import { describe, expect, it } from "vitest";
 
 import type { AccountView } from "../../finance";
-import { ReportsPage, type ReportCategoryItem } from "./ReportsPage";
+import { defaultReportSections, ReportsPage, type ReportCategoryItem } from "./ReportsPage";
+import { REPORT_KEYS, type ReportKey, type ReportSectionState } from "./useReportSections";
+
+/** Every tab shows the same fixture's data, which is enough for these tests since they only check per-tab content. */
+function sectionsFromAnalytics(analytics: ReportAnalyticsResponse): Record<ReportKey, ReportSectionState> {
+  return Object.fromEntries(
+    REPORT_KEYS.map((key) => [key, { analytics, range: {}, busy: false, failed: false }]),
+  ) as Record<ReportKey, ReportSectionState>;
+}
 
 vi.mock("../../components/charts", () => ({
   ReportChart: ({ label }: { label: string }) => (
@@ -110,7 +118,11 @@ function analyticsFixture(): ReportAnalyticsResponse {
 
 describe("ReportsPage", () => {
   it("contains a report failure without hiding the rest of the application", () => {
-    render(<ReportsPage loadFailed />);
+    render(
+      <ReportsPage
+        sections={{ ...defaultReportSections, trend: { ...defaultReportSections.trend, failed: true } }}
+      />,
+    );
     expect(screen.getByText(/Rapor verileri yüklenemedi/)).toBeInTheDocument();
   });
 
@@ -212,19 +224,22 @@ describe("ReportsPage", () => {
     expect(screen.queryByText("Gelir tarafı")).not.toBeInTheDocument();
   });
 
-  it("applies date and account selections through the shared report filter", async () => {
+  it("applies date and account selections through the active tab's own filter", async () => {
     const user = userEvent.setup();
     const bank = reportAccount("00000000-0000-4000-8000-000000000001", "Banka");
     const cash = reportAccount("00000000-0000-4000-8000-000000000002", "Nakit");
-    const onFilterChange = vi.fn().mockResolvedValue(undefined);
+    const onApply = vi.fn().mockResolvedValue(undefined);
 
     render(
       <ReportsPage
         accounts={[bank, cash]}
         costCenters={[]}
         items={[]}
-        range={{ from: "2026-08-01", to: "2026-08-14" }}
-        onFilterChange={onFilterChange}
+        sections={{
+          ...defaultReportSections,
+          trend: { ...defaultReportSections.trend, range: { from: "2026-08-01", to: "2026-08-14" } },
+        }}
+        onApply={onApply}
       />,
     );
 
@@ -235,7 +250,7 @@ describe("ReportsPage", () => {
     await user.click(screen.getByRole("button", { name: "Raporu uygula" }));
 
     await waitFor(() => {
-      expect(onFilterChange).toHaveBeenCalledWith({
+      expect(onApply).toHaveBeenCalledWith("trend", {
         from: "2026-07-01",
         to: "2026-08-14",
         accountIds: [cash.id],
@@ -244,9 +259,29 @@ describe("ReportsPage", () => {
     });
   });
 
+  it("switching tabs shows that tab's own filter, not the previous tab's edits", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <ReportsPage
+        sections={{
+          ...defaultReportSections,
+          trend: { ...defaultReportSections.trend, range: { from: "2026-08-01", to: "2026-08-14" } },
+          liquidity: { ...defaultReportSections.liquidity, range: { from: "2026-09-01", to: "2026-10-31" } },
+        }}
+      />,
+    );
+
+    expect(screen.getByLabelText("Başlangıç")).toHaveValue("2026-08-01");
+    await user.click(screen.getByRole("button", { name: "Likidite tahmini" }));
+    expect(screen.getByLabelText("Başlangıç")).toHaveValue("2026-09-01");
+    await user.click(screen.getByRole("button", { name: "Gelir · Gider · Net" }));
+    expect(screen.getByLabelText("Başlangıç")).toHaveValue("2026-08-01");
+  });
+
   it("navigates all five analytics reports and exposes transaction drill-down", async () => {
     const user = userEvent.setup();
-    render(<ReportsPage analytics={analyticsFixture()} />);
+    render(<ReportsPage sections={sectionsFromAnalytics(analyticsFixture())} />);
 
     expect(screen.getByRole("heading", { name: "Gelir–Gider–Net Trendi" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Hesap bakiyeleri" }));
@@ -265,7 +300,7 @@ describe("ReportsPage", () => {
 
   it("compares account totals and drills into an account's instruments", async () => {
     const user = userEvent.setup();
-    render(<ReportsPage analytics={analyticsFixture()} />);
+    render(<ReportsPage sections={sectionsFromAnalytics(analyticsFixture())} />);
 
     await user.click(screen.getByRole("button", { name: "Varlık ve yatırım" }));
     const panel = screen
@@ -294,7 +329,7 @@ describe("ReportsPage", () => {
     const user = userEvent.setup();
     const openSpy = vi.spyOn(window, "open").mockReturnValue(null);
     const notify = vi.fn();
-    render(<ReportsPage analytics={analyticsFixture()} onNotify={notify} />);
+    render(<ReportsPage sections={sectionsFromAnalytics(analyticsFixture())} onNotify={notify} />);
 
     await user.click(screen.getByRole("button", { name: "Varlık ve yatırım" }));
     const performancePanel = screen

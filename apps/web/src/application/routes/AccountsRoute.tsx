@@ -50,6 +50,7 @@ export function AccountsRoute() {
       currencies={snapshot.currencies}
       busy={mutationBusy}
       sharing={sharing}
+      loadStatement={(accountId, period) => service.loadAccountStatement(accountId, period)}
       onCreateAccount={(values) =>
         mutate(
           () => service.createAccount({ ...values, isArchived: false, sortOrder: 0 }),

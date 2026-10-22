@@ -160,8 +160,52 @@ async function expectPostingError(accountId,amount,expectedCode){
   if(response.status!==422||payload?.error?.code!==expectedCode)throw new Error(`Expected ${expectedCode}, received ${response.status} ${payload?.error?.code}`);
 }
 await expectPostingError(changedAccountType.id,"1","NEGATIVE_BALANCE_NOT_ALLOWED");
-const limitedAccount=(await request(`/api/v1/accounts/${changedAccountType.id}`,{method:"PATCH",headers:authorization,body:JSON.stringify({allowNegativeBalance:true,creditLimit:"50",version:changedAccountType.version})})).payload;
+const limitedAccount=(await request(`/api/v1/accounts/${changedAccountType.id}`,{method:"PATCH",headers:authorization,body:JSON.stringify({allowNegativeBalance:true,creditLimit:"50",statementDay:10,paymentDueOffsetDays:12,defaultFundingAccountId:account.id,version:changedAccountType.version})})).payload;
+if(limitedAccount.statementDay!==10||limitedAccount.paymentDueOffsetDays!==12)throw new Error(`Statement/due-day fields were not persisted: ${JSON.stringify(limitedAccount)}`);
+if(limitedAccount.defaultFundingAccountId!==account.id)throw new Error(`Default funding account was not persisted: ${JSON.stringify(limitedAccount)}`);
 await expectPostingError(limitedAccount.id,"60","ACCOUNT_LIMIT_EXCEEDED");
+
+// Installment purchase: the full amount hits the card's debt today, each
+// installment is a scheduled TRANSFER back from the funding account, and
+// realizing one pays that share of the debt down.
+const installmentPurchase=(await request("/api/v1/transactions/installments",{
+  method:"POST",headers:{...authorization,"Idempotency-Key":randomUUID()},
+  body:JSON.stringify({bookId:book.id,accountId:limitedAccount.id,fundingAccountId:account.id,categoryId:category.id,title:"Smoke installment purchase",amount:"30",currencyCode:"TRY",transactionDate:"2026-08-07T12:00:00.000Z",installmentCount:3,clientOperationId:randomUUID()})
+})).payload;
+if(installmentPurchase.transaction.type!=="EXPENSE"||Number(installmentPurchase.transaction.amount)!==30)throw new Error(`Installment purchase did not post the full amount: ${JSON.stringify(installmentPurchase.transaction)}`);
+if(installmentPurchase.scheduledTransactions.length!==3)throw new Error(`Expected three installment plans, received ${installmentPurchase.scheduledTransactions.length}`);
+const installmentSum=installmentPurchase.scheduledTransactions.reduce((sum,item)=>sum+Number(item.amount),0);
+if(Math.abs(installmentSum-30)>0.000001)throw new Error(`Installment shares did not sum back to the total: ${installmentSum}`);
+if(installmentPurchase.scheduledTransactions.some((item)=>item.transactionType!=="TRANSFER"||item.accountId!==account.id||item.targetAccountId!==limitedAccount.id))throw new Error("Installment plans did not target the card from the funding account");
+// limitedAccount is DEBIT-normal (Banka type) with overdraft, not a CREDIT-normal
+// type, so its user-facing displayBalance goes negative as debt - the same
+// "eksiye düşen hesap" shape as any overdrawn bank account.
+const cardAfterPurchase=(await request(`/api/v1/accounts/${limitedAccount.id}/balance`,{headers:authorization})).payload;
+if(Number(cardAfterPurchase.displayBalance)!==-30)throw new Error(`Card debt was not posted immediately: ${cardAfterPurchase.displayBalance}`);
+const firstInstallment=installmentPurchase.scheduledTransactions[0];
+const installmentRealized=(await request(`/api/v1/scheduled-transactions/${firstInstallment.id}/realize`,{method:"POST",headers:authorization,body:JSON.stringify({version:firstInstallment.version,clientOperationId:randomUUID()})})).payload;
+const cardAfterRealize=(await request(`/api/v1/accounts/${limitedAccount.id}/balance`,{headers:authorization})).payload;
+if(Number(cardAfterRealize.displayBalance)!==-30+Number(firstInstallment.amount))throw new Error(`Realizing the first installment did not pay down the card: ${cardAfterRealize.displayBalance}`);
+// Card ekstresi: shows the realized first share, never the plan's own 30 origin posting.
+const cardStatement=(await request(`/api/v1/accounts/${limitedAccount.id}/statement?period=2026-08`,{headers:authorization})).payload;
+if(cardStatement.items.some((item)=>item.title==="Smoke installment purchase"))throw new Error("Statement must not show the installment plan's own origin posting");
+const firstShareOnStatement=cardStatement.items.find((item)=>item.title.startsWith("Smoke installment purchase (taksit 1/3)"));
+if(!firstShareOnStatement||Number(firstShareOnStatement.amount)!==10||firstShareOnStatement.status!=="COMPLETED")throw new Error(`Statement did not show the realized first installment: ${JSON.stringify(cardStatement.items)}`);
+if(Number(cardStatement.total)!==10)throw new Error(`Statement total was wrong: ${cardStatement.total}`);
+// Partial payment: realizing the second share for less than its plan shows
+// the truth (what was actually paid) alongside the original plan, while the
+// statement's own total stays the full nominal amount.
+const secondInstallment=installmentPurchase.scheduledTransactions[1];
+const partialRealized=(await request(`/api/v1/scheduled-transactions/${secondInstallment.id}/realize`,{method:"POST",headers:authorization,body:JSON.stringify({version:secondInstallment.version,amount:"7",clientOperationId:randomUUID()})})).payload;
+const septemberStatement=(await request(`/api/v1/accounts/${limitedAccount.id}/statement?period=2026-09`,{headers:authorization})).payload;
+const secondShareOnStatement=septemberStatement.items.find((item)=>item.title.startsWith("Smoke installment purchase (taksit 2/3)"));
+if(!secondShareOnStatement||Number(secondShareOnStatement.amount)!==7||Number(secondShareOnStatement.plannedAmount)!==10||secondShareOnStatement.status!=="COMPLETED")throw new Error(`Statement did not show the partial payment truthfully: ${JSON.stringify(septemberStatement.items)}`);
+if(Number(septemberStatement.total)!==10)throw new Error(`Statement total should stay the full planned amount after a partial payment: ${septemberStatement.total}`);
+// Undo every posting so this scenario's activity doesn't bleed into the later,
+// unrelated cumulative-balance checks on the shared `account`/`limitedAccount` fixtures.
+await request(`/api/v1/transactions/${partialRealized.transaction.id}/reverse?bookId=${book.id}`,{method:"POST",headers:{...authorization,"Idempotency-Key":randomUUID()},body:JSON.stringify({clientOperationId:randomUUID(),reason:"Installment smoke cleanup"})});
+await request(`/api/v1/transactions/${installmentRealized.transaction.id}/reverse?bookId=${book.id}`,{method:"POST",headers:{...authorization,"Idempotency-Key":randomUUID()},body:JSON.stringify({clientOperationId:randomUUID(),reason:"Installment smoke cleanup"})});
+await request(`/api/v1/transactions/${installmentPurchase.transaction.id}/reverse?bookId=${book.id}`,{method:"POST",headers:{...authorization,"Idempotency-Key":randomUUID()},body:JSON.stringify({clientOperationId:randomUUID(),reason:"Installment smoke cleanup"})});
 
 const scheduledSeries=(await request("/api/v1/scheduled-transactions",{
   method:"POST",headers:authorization,
@@ -331,6 +375,10 @@ console.log(JSON.stringify({
   cashflow: "passed",
   negativeBalanceRule: "passed",
   creditLimitRule: "passed",
+  installmentExpense: "passed",
+  accountStatement: "passed",
+  partialPayment: "passed",
+  defaultFundingAccount: "passed",
   editableAccountType: "passed",
   editableOpeningBalance: "passed",
   scheduledRecurrence: "passed",

@@ -91,6 +91,14 @@ export async function syncMarketCatalog(client: DbClient, fetcher: typeof fetch 
          WHERE is_active=true AND last_seen_at<$1 AND market IN ('US','BIST')`,
         [seenAt],
       );
+      // Turkish mutual funds (asset type name contains "fon", same test
+      // planPriceSync uses to route them to TEFAS) keep hand-typed 2-4 letter
+      // TEFAS codes, which regularly collide with an unrelated US/BIST ticker
+      // of the same letters (e.g. TEFAS "URA" is a TRY-priced energy fund,
+      // Yahoo "URA" is the USD Global X Uranium ETF). Auto-linking one of
+      // these to the wrong market symbol silently swaps in a price from a
+      // different security and currency - so funds are never eligible here,
+      // only equities/ETFs actually meant to track a real market ticker.
       await client.query(
         `UPDATE investment_instruments i SET market_symbol_id=s.id,symbol=s.provider_symbol,
              currency_code=s.currency_code,updated_at=now(),version=i.version+1
@@ -99,6 +107,10 @@ export async function syncMarketCatalog(client: DbClient, fetcher: typeof fetch 
            AND s.is_active=true AND (
              upper(i.symbol)=s.provider_symbol OR
              (s.market='BIST' AND upper(i.symbol)||'.IS'=s.provider_symbol)
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM investment_asset_types t
+             WHERE t.id=i.asset_type_id AND t.name ILIKE '%fon%'
            )`,
       );
       await client.query(

@@ -2,6 +2,7 @@ import type {
   AccountPostingContextDTO,
   AccountShareListResponse,
   AccountSharePermission,
+  AccountStatementResponse,
   BalanceReportResponse,
   BookListItemDTO,
   CorrectTransactionResponse,
@@ -13,6 +14,8 @@ import type {
   CreateCategoryResponse,
   CreateCostCenterRequest,
   CreateCostCenterResponse,
+  CreateInstallmentExpenseRequest,
+  CreateInstallmentExpenseResponse,
   CreateInvestmentAssetTypeRequest,
   CreateInvestmentAssetTypeResponse,
   CreateInvestmentInstrumentRequest,
@@ -123,6 +126,7 @@ import {
   accountSchema,
   accountShareListSchema,
   accountShareSchema,
+  accountStatementSchema,
   accountTypeListSchema,
   accountTypeSchema,
   bookListSchema,
@@ -133,6 +137,7 @@ import {
   correctTransactionResponseSchema,
   revokedAccountShareSchema,
   sharedWithMeListSchema,
+  createInstallmentExpenseResponseSchema,
   createScheduledTransactionResponseSchema,
   createdBookSchema,
   deleteAccountResponseSchema,
@@ -203,6 +208,11 @@ export interface FinanceServiceDependencies {
 
 export type CreateFinanceTransactionInput = Omit<
   CreateTransactionRequest,
+  "bookId" | "currencyCode" | "clientOperationId"
+> & { currencyCode?: string };
+
+export type CreateFinanceInstallmentExpenseInput = Omit<
+  CreateInstallmentExpenseRequest,
   "bookId" | "currencyCode" | "clientOperationId"
 > & { currencyCode?: string };
 
@@ -715,23 +725,28 @@ export class FinanceService {
   }
 
   /**
-   * Stateless variant of loadReportAnalytics: fetches the same analytics
-   * payload but never commits reportRange/reportAnalytics, so callers (like
-   * the Investments page's own value-history chart) can pick an independent
-   * date range and granularity without clobbering the Reports page's filter.
+   * Stateless variant of loadReportAnalytics: fetches the full analytics
+   * payload for an arbitrary range without touching shared snapshot state, so
+   * callers can keep their own independent filter (e.g. the Reports page
+   * giving each tab its own date range/account filter, or the Investments
+   * page's own value-history chart) without clobbering anyone else's.
    */
-  async loadInvestmentValueSeries(
-    range: ReportRange = {},
-  ): Promise<ReportAnalyticsResponse["investmentValueSeries"]> {
+  async loadReportAnalyticsSnapshot(range: ReportRange = {}): Promise<ReportAnalyticsResponse> {
     const stableRange: ReportRange = {
       ...range,
       accountIds: range.accountIds ? [...range.accountIds] : undefined,
       granularity: range.granularity ?? "month",
     };
-    const response: ReportAnalyticsResponse = await this.#api.request(
+    return this.#api.request(
       `/api/v1/reports/analytics?${this.#reportQuery(stableRange)}`,
       { schema: reportAnalyticsSchema },
     );
+  }
+
+  async loadInvestmentValueSeries(
+    range: ReportRange = {},
+  ): Promise<ReportAnalyticsResponse["investmentValueSeries"]> {
+    const response = await this.loadReportAnalyticsSnapshot(range);
     return response.investmentValueSeries;
   }
 
@@ -768,6 +783,18 @@ export class FinanceService {
       idempotencyKey: this.#randomUUID(),
       body: operation,
       schema: transactionMutationResultSchema,
+    });
+  }
+
+  createInstallmentExpense(
+    input: CreateFinanceInstallmentExpenseInput,
+  ): Promise<CreateInstallmentExpenseResponse> {
+    const { currencyCode = this.#requireBook().baseCurrency, ...values } = input;
+    return this.#api.request("/api/v1/transactions/installments", {
+      method: "POST",
+      idempotencyKey: this.#randomUUID(),
+      body: { bookId: this.bookId(), currencyCode, clientOperationId: this.#randomUUID(), ...values },
+      schema: createInstallmentExpenseResponseSchema,
     });
   }
 
@@ -872,6 +899,14 @@ export class FinanceService {
     return this.#api.request(
       `/api/v1/accounts/${accountId}/posting-context?_=${this.#now().getTime()}`,
       { schema: accountPostingContextSchema },
+    );
+  }
+
+  /** One statement (closing period) for a card-like account. Omit `period` for the next upcoming one. */
+  loadAccountStatement(accountId: UUID, period?: string): Promise<AccountStatementResponse> {
+    return this.#api.request(
+      `/api/v1/accounts/${accountId}/statement?${buildQuery({ period, _: this.#now().getTime() })}`,
+      { schema: accountStatementSchema },
     );
   }
 

@@ -1,11 +1,12 @@
 import { useState, type CSSProperties } from "react";
-import type { AccountTypeDTO, CurrencyDTO } from "@defterx/contracts";
+import type { AccountStatementResponse, AccountTypeDTO, CurrencyDTO } from "@defterx/contracts";
 
 import { Button, InlineFeedback } from "../../components/ui";
 import { errorMessage } from "../../lib/error-message";
 import { money, moneyInCurrency, toNumber } from "../../lib/format";
 import { AccountDialog } from "./AccountDialog";
 import { AccountShareDialog } from "./AccountShareDialog";
+import { AccountStatementDialog } from "./AccountStatementDialog";
 import { SharedAccountsSection } from "./SharedAccountsSection";
 import type { AccountSharingApi, AccountViewModel, AccountsPageCallbacks } from "./account-types";
 
@@ -19,6 +20,8 @@ export interface AccountsPageProps extends AccountsPageCallbacks {
   confirmDelete?: (account: AccountViewModel) => boolean | Promise<boolean>;
   /** Present in the real app; omit to render the page without sharing. */
   sharing?: AccountSharingApi;
+  /** Present in the real app; omit to hide the "Ekstre" action on card-like accounts. */
+  loadStatement?: (accountId: string, period?: string) => Promise<AccountStatementResponse>;
 }
 
 export function AccountsPage({
@@ -33,12 +36,14 @@ export function AccountsPage({
         : `“${account.name}” hesabı silinsin mi? Kullanılmışsa arşivlenecektir.`,
     ),
   sharing,
+  loadStatement,
   onCreateAccount,
   onDeleteAccount,
   onUpdateAccount,
 }: AccountsPageProps) {
   const [editingAccount, setEditingAccount] = useState<AccountViewModel | null | undefined>();
   const [sharingAccount, setSharingAccount] = useState<AccountViewModel | null>(null);
+  const [statementAccount, setStatementAccount] = useState<AccountViewModel | null>(null);
   const [deletingAccountId, setDeletingAccountId] = useState<string | null>(null);
   const [pageFeedback, setPageFeedback] = useState("");
   const total = accounts
@@ -120,6 +125,16 @@ export function AccountsPage({
                         Paylaş
                       </button>
                     ) : null}
+                    {loadStatement && account.statementDay != null ? (
+                      <button
+                        data-statement-account={account.id}
+                        disabled={busy || deletingAccountId !== null}
+                        type="button"
+                        onClick={() => setStatementAccount(account)}
+                      >
+                        Ekstre
+                      </button>
+                    ) : null}
                     <button
                       className="danger-link"
                       data-delete-account={account.id}
@@ -163,6 +178,14 @@ export function AccountsPage({
                       ? "Eksi bakiyeye izin verilir"
                       : "Eksi bakiyeye kapalı"}
                 </small>
+                {account.statementDay != null ? (
+                  <small>
+                    Kesim: her ayın {account.statementDay}.
+                    {account.paymentDueOffsetDays != null
+                      ? ` · Ödeme: kesimden ${account.paymentDueOffsetDays} gün sonra`
+                      : ""}
+                  </small>
+                ) : null}
                 <div className="account-line"><span /></div>
               </article>
             );
@@ -175,6 +198,7 @@ export function AccountsPage({
           key={editingAccount?.id ?? "new-account"}
           account={editingAccount}
           accountTypes={accountTypes}
+          accounts={accounts}
           currencies={currencies}
           onClose={() => setEditingAccount(undefined)}
           onCreate={onCreateAccount}
@@ -188,6 +212,15 @@ export function AccountsPage({
           account={{ id: sharingAccount.id, name: sharingAccount.name }}
           sharing={sharing}
           onClose={() => setSharingAccount(null)}
+        />
+      ) : null}
+
+      {loadStatement && statementAccount ? (
+        <AccountStatementDialog
+          key={statementAccount.id}
+          account={{ id: statementAccount.id, name: statementAccount.name }}
+          loadStatement={loadStatement}
+          onClose={() => setStatementAccount(null)}
         />
       ) : null}
     </section>

@@ -49,6 +49,14 @@ export function TransactionDialog({
   const [targetAccountId, setTargetAccountId] = useState(() => seed?.targetAccountId ?? "");
   const [categoryId, setCategoryId] = useState(() => seed?.categoryId ?? "");
   const [costCenterId, setCostCenterId] = useState(() => seed?.costCenterId ?? "");
+  const [installmentCount, setInstallmentCount] = useState("1");
+  const [fundingAccountId, setFundingAccountId] = useState(
+    () => accounts.find((account) => account.id === accountId)?.defaultFundingAccountId ?? "",
+  );
+  // Tracks which account the funding-account field was last defaulted for, so
+  // switching the purchase to a different card re-defaults it (to that card's
+  // own payment account) without clobbering a manual choice on every render.
+  const [fundingAccountDefaultedFor, setFundingAccountDefaultedFor] = useState(accountId);
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState("");
 
@@ -56,6 +64,22 @@ export function TransactionDialog({
     () => accounts.filter((account) => !account.isArchived || account.id === seed?.accountId || account.id === seed?.targetAccountId),
     [accounts, seed],
   );
+
+  // Installments only make sense for a brand-new purchase (never while editing,
+  // correcting, or realizing a scheduled plan) against an account that has a
+  // statement cycle configured (Hesaplar -> kesim günü).
+  const selectedAccount = accounts.find((account) => account.id === accountId);
+  const installmentsEligible = kind === "expense" && !transaction && !prefill && selectedAccount?.statementDay != null;
+  const showFundingAccount = installmentsEligible && (Number(installmentCount) || 1) >= 2;
+  const fundingAccountOptions = availableAccounts.filter((account) => account.id !== accountId);
+
+  // The card's own default payment account (Hesaplar -> Ödeme hesabı) pre-fills
+  // this field so the user doesn't have to pick the same account every time;
+  // re-run only when the selected card itself changes, never on other edits.
+  if (accountId !== fundingAccountDefaultedFor) {
+    setFundingAccountDefaultedFor(accountId);
+    setFundingAccountId(selectedAccount?.defaultFundingAccountId ?? "");
+  }
 
   const availableCategories = useMemo(
     () => categories.filter((category) => category.isActive || category.id === seed?.categoryId),
@@ -107,6 +131,25 @@ export function TransactionDialog({
       return;
     }
 
+    const submittedAccount = accounts.find((account) => account.id === submittedAccountId);
+    const installmentsSubmittable = submittedKind === "expense" && !transaction && !prefill && submittedAccount?.statementDay != null;
+    const submittedInstallmentCount = installmentsSubmittable ? Number(formString(values, "installmentCount")) : 1;
+    const submittedFundingAccountId = formString(values, "fundingAccountId");
+    if (installmentsSubmittable && submittedInstallmentCount >= 2) {
+      if (!Number.isInteger(submittedInstallmentCount) || submittedInstallmentCount > 36) {
+        setFeedback("Taksit sayısı 2-36 arasında olmalı.");
+        return;
+      }
+      if (!submittedFundingAccountId) {
+        setFeedback("Taksitlerin ödeneceği hesabı seçin.");
+        return;
+      }
+      if (submittedFundingAccountId === submittedAccountId) {
+        setFeedback("Ödeme hesabı kart hesabından farklı olmalı.");
+        return;
+      }
+    }
+
     setSubmitting(true);
     setFeedback("");
     try {
@@ -124,6 +167,9 @@ export function TransactionDialog({
               : {}),
           ...(submittedKind === "expense" && submittedCostCenterId
             ? { costCenterId: submittedCostCenterId }
+            : {}),
+          ...(installmentsSubmittable && submittedInstallmentCount >= 2
+            ? { installmentCount: submittedInstallmentCount, fundingAccountId: submittedFundingAccountId }
             : {}),
         },
         transaction,
@@ -256,6 +302,32 @@ export function TransactionDialog({
                   hint: item.isActive ? undefined : "· Pasif",
                 })),
               ]}
+            />
+          </label>
+          <label id="installment-count-field" hidden={!installmentsEligible}>
+            <span>Taksit sayısı</span>
+            <input
+              disabled={!installmentsEligible}
+              inputMode="numeric"
+              name="installmentCount"
+              type="number"
+              value={installmentCount}
+              onChange={(event) => setInstallmentCount(event.currentTarget.value)}
+            />
+          </label>
+          <label id="funding-account-field" hidden={!showFundingAccount}>
+            <span>Taksitlerin ödeneceği hesap</span>
+            <SearchableSelect
+              name="fundingAccountId"
+              value={fundingAccountId}
+              onChange={setFundingAccountId}
+              disabled={!showFundingAccount}
+              placeholder="Ödeme hesabı seçin"
+              options={fundingAccountOptions.map((account) => ({
+                value: account.id,
+                label: account.name,
+                hint: account.isArchived ? "· Arşivli" : undefined,
+              }))}
             />
           </label>
         </div>

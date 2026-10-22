@@ -61,7 +61,7 @@ app.get("/health/ready", async (c) => {
         AND has_table_privilege(current_user,'public.currency_daily_rates','SELECT,INSERT,UPDATE,DELETE') AS tables_ready,
       has_sequence_privilege(current_user,'public.transaction_number_seq','USAGE') AS sequence_ready`));
     const checks = result.rows[0]!;
-    const expectedMigrations = 27;
+    const expectedMigrations = 30;
     const ready = checks.migration_count === expectedMigrations && checks.schema_ready && checks.tables_ready
       && checks.sequence_ready && secretBytes >= 32 && pepperBytes >= 32 && passwordResetPepperBytes >= 32;
     return c.json({ status: ready ? "ready" : "not_ready", checks: {

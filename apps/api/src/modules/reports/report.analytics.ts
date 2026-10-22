@@ -184,10 +184,20 @@ export async function loadReportAnalytics(
         `WITH selected_accounts AS (${accountScope}), periods AS (
            SELECT generate_series(date_trunc($6,$2::timestamptz),date_trunc($6,$3::timestamptz),$7::interval) bucket
          ), opening AS (
+           -- An ADJUSTMENT that touches the synthetic SYSTEM_EQUITY account
+           -- (investment buy/sell, paid capital increases, equity-funded deposits)
+           -- materializes/removes value out of nowhere rather than moving it
+           -- between two real tracked accounts - it belongs on the investments
+           -- pages, not a cash-liquidity forecast. An ADJUSTMENT between two real
+           -- accounts (e.g. an FX conversion) is real money movement and still
+           -- counts, same as a TRANSFER would.
            SELECT COALESCE(SUM((CASE WHEN e.direction='DEBIT' THEN e.amount ELSE -e.amount END) * sa.try_rate),0) balance
            FROM selected_accounts sa
            JOIN transaction_entries e ON e.account_id=sa.id
            JOIN transactions t ON t.id=e.transaction_id AND t.status='POSTED' AND t.transaction_type<>'REVERSAL'
+             AND NOT (t.transaction_type='ADJUSTMENT' AND EXISTS (
+               SELECT 1 FROM accounts sys WHERE sys.id IN (t.account_id,t.target_account_id) AND sys.is_system
+             ))
            WHERE t.transaction_date < $2::timestamptz
          ), event_impacts AS (
            SELECT t.transaction_date AS at,
@@ -195,6 +205,9 @@ export async function loadReportAnalytics(
            FROM selected_accounts sa
            JOIN transaction_entries e ON e.account_id=sa.id
            JOIN transactions t ON t.id=e.transaction_id AND t.status='POSTED' AND t.transaction_type<>'REVERSAL'
+             AND NOT (t.transaction_type='ADJUSTMENT' AND EXISTS (
+               SELECT 1 FROM accounts sys WHERE sys.id IN (t.account_id,t.target_account_id) AND sys.is_system
+             ))
            WHERE t.transaction_date BETWEEN $2 AND $3
            UNION ALL
            SELECT s.scheduled_at AS at,
@@ -228,12 +241,17 @@ export async function loadReportAnalytics(
            -- Realized: already-posted transactions dated inside the window, the
            -- same rows the chart's event_impacts adds on top of the plans. Listing
            -- them here lets every chart bar be reconciled against a table row.
+           -- Equity-touching ADJUSTMENT excluded for the same reason as
+           -- event_impacts above.
            SELECT t.id,t.title,t.transaction_date AS "scheduledAt",t.transaction_type AS type,
              (CASE WHEN e.direction='DEBIT' THEN e.amount ELSE -e.amount END) * sa.try_rate impact,
              true AS realized
            FROM selected_accounts sa
            JOIN transaction_entries e ON e.account_id=sa.id
            JOIN transactions t ON t.id=e.transaction_id AND t.status='POSTED' AND t.transaction_type<>'REVERSAL'
+             AND NOT (t.transaction_type='ADJUSTMENT' AND EXISTS (
+               SELECT 1 FROM accounts sys WHERE sys.id IN (t.account_id,t.target_account_id) AND sys.is_system
+             ))
            WHERE t.transaction_date BETWEEN $2 AND $3
            UNION ALL
            SELECT s.id,s.title,s.scheduled_at AS "scheduledAt",s.transaction_type AS type,
@@ -249,9 +267,15 @@ export async function loadReportAnalytics(
              AND s.status IN ('PENDING','OVERDUE') AND s.deleted_at IS NULL
              AND s.scheduled_at BETWEEN $2 AND $3
          )
-         SELECT id,title,"scheduledAt",type,realized,SUM(impact)::text impact
-         FROM impacts GROUP BY id,title,"scheduledAt",type,realized
-         HAVING SUM(impact)<>0 ORDER BY "scheduledAt",title LIMIT 200`,
+         -- One row per matching leg, not one per transaction: a transfer between
+         -- two selected accounts produces two opposite-signed rows here (as it
+         -- does in the chart's event_impacts above), both summing to its net
+         -- zero effect on the combined total. Grouping+summing by id here would
+         -- net those two legs to 0 and silently drop the transfer from the
+         -- table while the chart still counted both - breaking the "every
+         -- chart bar reconciles against a table row" invariant above.
+         SELECT id,title,"scheduledAt",type,realized,impact::text impact
+         FROM impacts WHERE impact<>0 ORDER BY "scheduledAt",title LIMIT 200`,
         scopeValues,
       ),
       pool.query(

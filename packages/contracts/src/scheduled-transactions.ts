@@ -150,6 +150,31 @@ export type RealizeScheduledTransactionResponse =
 
 export type DeleteScheduledTransactionResponse = DeletedEntityResponse;
 
+/**
+ * Posts the full purchase against the card today, then plans one scheduled
+ * TRANSFER per installment from `fundingAccountId` to the card, dated to the
+ * card's own statement cycle (its `statementDay`/`paymentDueOffsetDays` on
+ * AccountDTO - both must be set). `installmentCount` of 2-36.
+ */
+export interface CreateInstallmentExpenseRequest {
+  bookId: UUID;
+  accountId: UUID;
+  fundingAccountId: UUID;
+  categoryId: UUID;
+  costCenterId?: UUID | null;
+  title: string;
+  amount: MoneyString;
+  currencyCode: CurrencyCode;
+  transactionDate: ISODateTimeString;
+  installmentCount: number;
+  clientOperationId: UUID;
+}
+
+export interface CreateInstallmentExpenseResponse {
+  transaction: TransactionMutationResultDTO;
+  scheduledTransactions: ScheduledTransactionDTO[];
+}
+
 export type RecurringFrequency = "DAILY" | "WEEKLY" | "MONTHLY" | "YEARLY" | "CUSTOM";
 
 export interface RecurringTransactionDTO {

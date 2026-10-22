@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from "react";
+import { useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import { useAuth } from "../auth/AuthProvider";
@@ -9,23 +9,16 @@ import { TransactionDialog } from "../modules/transactions/TransactionDialog";
 import type { TransactionDraft } from "../modules/transactions/transaction-types";
 import { useFinance } from "../providers/FinanceProvider";
 import { errorMessage } from "../lib/error-message";
-import { PageTour } from "../layouts/PageTour";
-import { REPORTS_PAGE_TOUR } from "../layouts/page-tours";
-import { useToast } from "./ToastProvider";
 import { AccountsRoute } from "./routes/AccountsRoute";
 import { DashboardRoute } from "./routes/DashboardRoute";
 import { InvestmentsRoute } from "./routes/InvestmentsRoute";
+import { ReportsRoute } from "./routes/ReportsRoute";
 import { SettingsRoute } from "./routes/SettingsRoute";
 import { TransactionsRoute } from "./routes/TransactionsRoute";
 import { UpcomingRoute } from "./routes/UpcomingRoute";
 
-const ReportsPage = lazy(() =>
-  import("../modules/reports").then((module) => ({ default: module.ReportsPage })),
-);
-
 export function AuthenticatedApp() {
   const { completeOnboarding, logout, session } = useAuth();
-  const { showToast } = useToast();
   const { apiStatus, initializationError, mutate, mutationBusy, refresh, service, snapshot } = useFinance();
   const [transactionEditor, setTransactionEditor] = useState<TransactionView | null | undefined>();
   const [tourDismissedLocally, setTourDismissedLocally] = useState(false);
@@ -41,6 +34,22 @@ export function AuthenticatedApp() {
   const saveTransaction = async (draft: TransactionDraft, transaction: TransactionView | null) => {
     if (transaction) {
       await mutate(() => service.correctTransaction(transaction.id, draft), "İşlem düzeltildi.");
+    } else if (draft.installmentCount && draft.installmentCount >= 2 && draft.fundingAccountId) {
+      const { installmentCount, fundingAccountId, categoryId, costCenterId, accountId, title, amount, transactionDate } = draft;
+      if (!categoryId) throw new Error("Taksitli harcama için kategori gerekli.");
+      await mutate(
+        () => service.createInstallmentExpense({
+          accountId,
+          fundingAccountId,
+          categoryId,
+          ...(costCenterId ? { costCenterId } : {}),
+          title,
+          amount,
+          transactionDate,
+          installmentCount,
+        }),
+        "Taksitli harcama kaydedildi.",
+      );
     } else {
       await mutate(() => service.createTransaction(draft), "İşlem kaydedildi.");
     }
@@ -63,23 +72,7 @@ export function AuthenticatedApp() {
       <Route path="/accounts" element={<AccountsRoute />} />
       <Route path="/savings" element={<InvestmentsRoute />} />
       <Route path="/upcoming" element={<UpcomingRoute />} />
-      <Route
-        path="/reports"
-        element={(
-          <Suspense fallback={<LoadingState />}>
-            <PageTour page="reports" steps={REPORTS_PAGE_TOUR} />
-            <ReportsPage
-              accounts={snapshot.accounts}
-              analytics={snapshot.reportAnalytics}
-              busy={snapshot.refreshing}
-              loadFailed={snapshot.reportLoadFailed}
-              range={snapshot.reportRange}
-              onFilterChange={(filter) => service.loadReportAnalytics(filter)}
-              onNotify={showToast}
-            />
-          </Suspense>
-        )}
-      />
+      <Route path="/reports" element={<ReportsRoute />} />
       <Route path="/settings" element={<SettingsRoute />} />
       <Route path="*" element={<Navigate replace to="/dashboard" />} />
     </Routes>

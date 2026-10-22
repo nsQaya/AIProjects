@@ -14,6 +14,18 @@ export class Money {
   subtract(other: Money): Money { return new Money(this.minor - other.minor); }
   equals(other: Money): boolean { return this.minor === other.minor; }
   isPositive(): boolean { return this.minor > 0n; }
+
+  /**
+   * Splits into `count` equal shares, truncated to whole minor units, with the
+   * leftover remainder (always smaller than `count` minor units) added to the
+   * last share so the parts sum back to the original exactly.
+   */
+  divideEvenly(count: number): Money[] {
+    const divisor = BigInt(count);
+    const base = this.minor / divisor;
+    const remainder = this.minor - base * divisor;
+    return Array.from({ length: count }, (_, index) => new Money(index === count - 1 ? base + remainder : base));
+  }
   toString(): string {
     const sign = this.minor < 0n ? "-" : "";
     const absolute = this.minor < 0n ? -this.minor : this.minor;

@@ -27,6 +27,9 @@ export interface AccountViewModel {
   readonly openingBalance: MoneyString;
   readonly allowNegativeBalance: boolean;
   readonly creditLimit: MoneyString | null;
+  readonly statementDay?: number | null;
+  readonly paymentDueOffsetDays?: number | null;
+  readonly defaultFundingAccountId?: UUID | null;
   readonly availableCredit: MoneyString | null;
   readonly isArchived: boolean;
   readonly version: Version;
@@ -37,6 +40,9 @@ export interface AccountFormValues {
   readonly accountTypeId: UUID;
   readonly allowNegativeBalance: boolean;
   readonly creditLimit: MoneyString | null;
+  readonly statementDay: number | null;
+  readonly paymentDueOffsetDays: number | null;
+  readonly defaultFundingAccountId: UUID | null;
 }
 
 export interface CreateAccountValues extends AccountFormValues {

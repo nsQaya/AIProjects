@@ -69,6 +69,9 @@ export const accountSchema = z.object({
   currencyCode: currencyCodeSchema,
   allowNegativeBalance: z.boolean(),
   creditLimit: decimalStringSchema.nullable(),
+  statementDay: z.number().int().nullable().optional(),
+  paymentDueOffsetDays: z.number().int().nullable().optional(),
+  defaultFundingAccountId: uuidSchema.nullable().optional(),
   isArchived: z.boolean(),
   sortOrder: z.number().int(),
   version: versionSchema,
@@ -88,6 +91,24 @@ export const deleteAccountResponseSchema = z.union([
     version: versionSchema,
   }),
 ]);
+
+export const accountStatementItemSchema = z.object({
+  id: uuidSchema,
+  kind: z.enum(["PURCHASE", "INSTALLMENT"]),
+  title: z.string(),
+  amount: decimalStringSchema,
+  plannedAmount: decimalStringSchema.optional(),
+  date: isoDateTimeSchema,
+  status: z.enum(["POSTED", "PENDING", "OVERDUE", "COMPLETED"]),
+});
+
+export const accountStatementSchema = z.object({
+  accountId: uuidSchema,
+  closingDate: isoDateTimeSchema,
+  dueDate: isoDateTimeSchema,
+  items: z.array(accountStatementItemSchema),
+  total: decimalStringSchema,
+});
 
 export const accountSharePermissionSchema = z.enum(["VIEW", "OPERATE"]);
 
@@ -320,5 +341,10 @@ export const realizeScheduledTransactionResponseSchema = z.union([
   alreadyRealizedScheduledSchema,
   newlyRealizedScheduledSchema,
 ]);
+
+export const createInstallmentExpenseResponseSchema = z.object({
+  transaction: transactionMutationResultSchema,
+  scheduledTransactions: z.array(scheduledTransactionSchema),
+});
 
 export const deleteScheduledTransactionResponseSchema = deletedEntitySchema;

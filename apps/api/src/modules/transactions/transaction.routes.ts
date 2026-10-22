@@ -7,6 +7,8 @@ import { AppError } from "../../common/errors";
 import type { DbClient } from "../../infrastructure/database";
 import { correctionSchema, reversalSchema, transactionMutationSchema } from "./transaction.schemas";
 import { correctTransaction, createTransaction, reverseTransaction } from "./transaction.service";
+import { createInstallmentExpenseSchema } from "../scheduled-transactions/scheduled.schemas";
+import { createInstallmentExpense } from "../scheduled-transactions/scheduled.service";
 
 export const transactionRoutes = new Hono<AppEnv>();
 
@@ -110,6 +112,18 @@ transactionRoutes.post("/",async (c) => {
   const key = c.req.header("Idempotency-Key");
   if (!key) throw new AppError(422,"IDEMPOTENCY_KEY_REQUIRED","Idempotency-Key header is required");
   return c.json(await createTransaction(pool,userId,input,key),201);
+});
+
+transactionRoutes.post("/installments",async (c) => {
+  const input = await parseJson(c.req.raw,createInstallmentExpenseSchema);
+  const pool = c.get("database");
+  const userId = c.get("user").id;
+  if (!hasBookRole(await getBookRole(pool,input.bookId,userId),"EDITOR")) {
+    throw new AppError(403,"INSUFFICIENT_ROLE","This action requires EDITOR access");
+  }
+  const key = c.req.header("Idempotency-Key");
+  if (!key) throw new AppError(422,"IDEMPOTENCY_KEY_REQUIRED","Idempotency-Key header is required");
+  return c.json(await createInstallmentExpense(pool,userId,input,key),201);
 });
 
 transactionRoutes.post("/:transactionId/reverse",async (c) => {

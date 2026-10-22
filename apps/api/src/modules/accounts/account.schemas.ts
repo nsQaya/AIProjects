@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { currency, nonnegativeMoney, uuid } from "../../common/schemas";
 
+// Statement (kesim) day of month; capped at 28 so it exists in every month.
+const statementDay = z.number().int().min(1).max(28);
+// Days from the statement day to the payment due date (e.g. 10).
+const paymentDueOffsetDays = z.number().int().min(0).max(60);
+
 export const createAccountSchema = z.object({
   bookId: uuid,
   name: z.string().trim().min(1).max(120),
@@ -9,6 +14,9 @@ export const createAccountSchema = z.object({
   currencyCode: currency,
   allowNegativeBalance: z.boolean().optional(),
   creditLimit: nonnegativeMoney.nullable().optional(),
+  statementDay: statementDay.nullable().optional(),
+  paymentDueOffsetDays: paymentDueOffsetDays.nullable().optional(),
+  defaultFundingAccountId: uuid.nullable().optional(),
   openingBalance: nonnegativeMoney.default("0"),
   isArchived: z.boolean().default(false),
   sortOrder: z.number().int().default(0)
@@ -19,6 +27,9 @@ export const updateAccountSchema = z.object({
   accountTypeId: uuid.optional(),
   allowNegativeBalance: z.boolean().optional(),
   creditLimit: nonnegativeMoney.nullable().optional(),
+  statementDay: statementDay.nullable().optional(),
+  paymentDueOffsetDays: paymentDueOffsetDays.nullable().optional(),
+  defaultFundingAccountId: uuid.nullable().optional(),
   openingBalance: nonnegativeMoney.optional(),
   isArchived: z.boolean().optional(),
   sortOrder: z.number().int().optional(),

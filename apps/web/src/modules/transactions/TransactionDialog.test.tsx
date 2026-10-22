@@ -29,6 +29,14 @@ const account = {
   ui: { balance: 0, displayBalance: 0, creditLimit: null, availableCredit: null },
 } satisfies AccountView;
 
+const cardAccount = {
+  ...account,
+  id: "account-card",
+  name: "Kredi Kartı",
+  statementDay: 10,
+  paymentDueOffsetDays: 10,
+} satisfies AccountView;
+
 const costCenter = {
   id: "cost-center-1",
   bookId: "book-1",
@@ -256,5 +264,149 @@ describe("TransactionDialog", () => {
         null,
       );
     });
+  });
+
+  it("kesim günü tanımlı bir hesap seçilince taksit alanını açar, düzenlemede açmaz", async () => {
+    const user = userEvent.setup();
+    render(
+      <TransactionDialog
+        accounts={[account, cardAccount]}
+        categories={[category]}
+        costCenters={[]}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+        open
+        transaction={null}
+      />,
+    );
+
+    expect(screen.getByLabelText("Taksit sayısı")).toBeDisabled();
+    await chooseComboboxOption(user, "Hesap", cardAccount.name);
+    expect(screen.getByLabelText("Taksit sayısı")).toBeEnabled();
+    expect(screen.getByLabelText("Taksitlerin ödeneceği hesap")).toBeDisabled();
+  });
+
+  it("düzenleme modunda kart hesabı seçili olsa bile taksit alanını hiç açmaz", () => {
+    render(
+      <TransactionDialog
+        accounts={[account, cardAccount]}
+        categories={[category]}
+        costCenters={[]}
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+        open
+        transaction={{ ...transaction, accountId: cardAccount.id }}
+      />,
+    );
+    expect(screen.getByLabelText("Taksit sayısı")).toBeDisabled();
+  });
+
+  it("taksit sayısı 2 ve üzerine çıkınca ödeme hesabını açar ve taksit bilgisiyle kaydeder", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <TransactionDialog
+        accounts={[account, cardAccount]}
+        categories={[category]}
+        costCenters={[]}
+        onClose={vi.fn()}
+        onSave={onSave}
+        open
+        transaction={null}
+      />,
+    );
+
+    await user.type(screen.getByLabelText(/Tutar/), "1200");
+    await user.type(screen.getByLabelText("Açıklama"), "Televizyon");
+    await chooseComboboxOption(user, "Hesap", cardAccount.name);
+    await chooseComboboxOption(user, "Kategori", category.name);
+
+    const installmentCount = screen.getByLabelText("Taksit sayısı");
+    await user.clear(installmentCount);
+    await user.type(installmentCount, "3");
+    expect(screen.getByLabelText("Taksitlerin ödeneceği hesap")).toBeEnabled();
+    await chooseComboboxOption(user, "Taksitlerin ödeneceği hesap", account.name);
+
+    await user.click(screen.getByRole("button", { name: "Kaydet" }));
+
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledWith(
+        expect.objectContaining({
+          accountId: cardAccount.id,
+          categoryId: category.id,
+          installmentCount: 3,
+          fundingAccountId: account.id,
+        }),
+        null,
+      );
+    });
+  });
+
+  it("kartın tanımlı ödeme hesabını taksit alanına otomatik doldurur", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const cardWithDefault = { ...cardAccount, defaultFundingAccountId: account.id } satisfies AccountView;
+
+    render(
+      <TransactionDialog
+        accounts={[account, cardWithDefault]}
+        categories={[category]}
+        costCenters={[]}
+        onClose={vi.fn()}
+        onSave={onSave}
+        open
+        transaction={null}
+      />,
+    );
+
+    await user.type(screen.getByLabelText(/Tutar/), "1200");
+    await user.type(screen.getByLabelText("Açıklama"), "Televizyon");
+    await chooseComboboxOption(user, "Hesap", cardWithDefault.name);
+    await chooseComboboxOption(user, "Kategori", category.name);
+
+    const installmentCount = screen.getByLabelText("Taksit sayısı");
+    await user.clear(installmentCount);
+    await user.type(installmentCount, "3");
+    expect(screen.getByLabelText("Taksitlerin ödeneceği hesap")).toHaveValue(account.name);
+
+    await user.click(screen.getByRole("button", { name: "Kaydet" }));
+
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledWith(
+        expect.objectContaining({ installmentCount: 3, fundingAccountId: account.id }),
+        null,
+      );
+    });
+  });
+
+  it("ödeme hesabı boşken taksitli kaydı reddeder", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <TransactionDialog
+        accounts={[account, cardAccount]}
+        categories={[category]}
+        costCenters={[]}
+        onClose={vi.fn()}
+        onSave={onSave}
+        open
+        transaction={null}
+      />,
+    );
+
+    await user.type(screen.getByLabelText(/Tutar/), "1200");
+    await user.type(screen.getByLabelText("Açıklama"), "Televizyon");
+    await chooseComboboxOption(user, "Hesap", cardAccount.name);
+    await chooseComboboxOption(user, "Kategori", category.name);
+    const installmentCount = screen.getByLabelText("Taksit sayısı");
+    await user.clear(installmentCount);
+    await user.type(installmentCount, "3");
+
+    await user.click(screen.getByRole("button", { name: "Kaydet" }));
+
+    expect(onSave).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("Taksitlerin ödeneceği hesabı seçin.");
   });
 });

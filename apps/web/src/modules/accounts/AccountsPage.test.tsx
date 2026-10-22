@@ -55,6 +55,18 @@ const bankAccount: AccountViewModel = {
   version: 3,
 };
 
+const cardAccount: AccountViewModel = {
+  ...bankAccount,
+  id: "account-card",
+  name: "Kredi Kartı",
+  accountTypeId: creditCardType.id,
+  accountTypeName: creditCardType.name,
+  allowNegativeBalance: true,
+  creditLimit: "5000",
+  statementDay: 10,
+  paymentDueOffsetDays: 10,
+};
+
 function callbacks() {
   return {
     onCreateAccount: vi.fn(() => Promise.resolve(undefined)),
@@ -185,9 +197,34 @@ describe("AccountsPage", () => {
       accountTypeId: bankType.id,
       allowNegativeBalance: true,
       creditLimit: "15000.50",
+      statementDay: null,
+      paymentDueOffsetDays: null,
+      defaultFundingAccountId: null,
       openingBalance: "0",
       currencyCode: "TRY",
     });
+  });
+
+  it("offers and submits a default funding account only when negative balance is allowed", async () => {
+    const user = userEvent.setup();
+    const actions = callbacks();
+    render(
+      <AccountsPage accounts={[bankAccount, cardAccount]} accountTypes={accountTypes} {...actions} />,
+    );
+
+    const cardArticle = screen.getByRole("heading", { name: "Kredi Kartı" }).closest("article")!;
+    await user.click(within(cardArticle).getByRole("button", { name: "Düzenle" }));
+    const dialog = await screen.findByRole("dialog", { name: "Hesabı düzenle" });
+    const fundingAccount = within(dialog).getByLabelText(/Ödeme hesabı/);
+    expect(fundingAccount).toBeVisible();
+
+    await chooseComboboxOption(user, fundingAccount, bankAccount.name);
+    await user.click(within(dialog).getByRole("button", { name: "Kaydet" }));
+
+    expect(actions.onUpdateAccount).toHaveBeenCalledWith(
+      cardAccount.id,
+      expect.objectContaining({ defaultFundingAccountId: bankAccount.id }),
+    );
   });
 
   it.each([
@@ -250,6 +287,9 @@ describe("AccountsPage", () => {
         accountTypeId: bankType.id,
         allowNegativeBalance: true,
         creditLimit: "500",
+        statementDay: null,
+        paymentDueOffsetDays: null,
+        defaultFundingAccountId: null,
         openingBalance: "0",
         version: bankAccount.version,
       });
@@ -342,5 +382,57 @@ describe("AccountsPage", () => {
         expect.objectContaining({ name: "Piapiri USD", currencyCode: "USD" }),
       );
     });
+  });
+
+  it("offers the Ekstre action only for an account with a statement day, and only when loadStatement is wired", () => {
+    const actions = callbacks();
+    const { rerender } = render(
+      <AccountsPage accounts={[bankAccount, cardAccount]} accountTypes={accountTypes} {...actions} />,
+    );
+    expect(screen.queryByRole("button", { name: "Ekstre" })).not.toBeInTheDocument();
+
+    rerender(
+      <AccountsPage
+        accounts={[bankAccount, cardAccount]}
+        accountTypes={accountTypes}
+        loadStatement={vi.fn()}
+        {...actions}
+      />,
+    );
+    expect(screen.getAllByRole("button", { name: "Ekstre" })).toHaveLength(1);
+    expect(screen.getByRole("heading", { name: "Kredi Kartı" }).closest(".account-card")).toContainElement(
+      screen.getByRole("button", { name: "Ekstre" }),
+    );
+  });
+
+  it("opens the statement dialog and lists the fetched period's items", async () => {
+    const user = userEvent.setup();
+    const actions = callbacks();
+    const loadStatement = vi.fn().mockResolvedValue({
+      accountId: cardAccount.id,
+      closingDate: "2026-06-10T00:00:00.000Z",
+      dueDate: "2026-06-20T00:00:00.000Z",
+      items: [
+        { id: "item-1", kind: "PURCHASE", title: "Market", amount: "150.00", date: "2026-06-05T00:00:00.000Z", status: "POSTED" },
+        { id: "item-2", kind: "INSTALLMENT", title: "Laptop (taksit 1/3)", amount: "100.00", date: "2026-06-20T00:00:00.000Z", status: "PENDING" },
+      ],
+      total: "250.00",
+    });
+    render(
+      <AccountsPage
+        accounts={[cardAccount]}
+        accountTypes={accountTypes}
+        loadStatement={loadStatement}
+        {...actions}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Ekstre" }));
+    expect(loadStatement).toHaveBeenCalledWith(cardAccount.id, undefined);
+
+    const dialog = await screen.findByRole("dialog", { name: "Kart ekstresi" });
+    expect(await within(dialog).findByText("Market")).toBeInTheDocument();
+    expect(within(dialog).getByText("Laptop (taksit 1/3)")).toBeInTheDocument();
+    expect(within(dialog).getByText(/Kesim:.*10 Haziran 2026/)).toBeInTheDocument();
   });
 });

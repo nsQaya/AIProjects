@@ -166,9 +166,15 @@ suite("PostgreSQL liquidity forecast integration",()=>{
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
+      // OPENING_BALANCE, not ADJUSTMENT: an equity-funded ADJUSTMENT (investment
+      // buy/sell, paid capital increases) is deliberately excluded from the
+      // liquidity forecast (see report.analytics.ts) - it materializes value out
+      // of nowhere rather than moving it between two real tracked accounts. This
+      // fixture is simulating a genuine funding event, which the liquidity
+      // forecast should still pick up.
       const funding = await client.query<{id:string}>(
         `INSERT INTO transactions(book_id,transaction_type,account_id,title,transaction_date,status,currency_code,client_operation_id,created_by)
-         VALUES($1,'ADJUSTMENT',$2,'USD yatirildi','2026-02-05T09:00:00.000Z','POSTED','USD',gen_random_uuid(),$3) RETURNING id`,
+         VALUES($1,'OPENING_BALANCE',$2,'USD yatirildi','2026-02-05T09:00:00.000Z','POSTED','USD',gen_random_uuid(),$3) RETURNING id`,
         [bookId,usdId,userId],
       );
       await client.query(
@@ -194,6 +200,83 @@ suite("PostgreSQL liquidity forecast integration",()=>{
     expect(Number(report.liquidity.items.at(-1)?.projectedBalance)).toBeCloseTo(42000,2);
     // The Gelir-Gider-Net balance line rebuilds the same way.
     expect(Number(report.trend.at(-1)?.balance)).toBeCloseTo(42000,2);
+  });
+
+  it("excludes equity-funded ADJUSTMENTs (investment buy/sell) but keeps a real ADJUSTMENT between two tracked accounts",async()=>{
+    // Regression coverage for the "birikim alımı" rows that were showing up as
+    // phantom cash outflows in the liquidity forecast: an ADJUSTMENT that
+    // debits/credits the synthetic SYSTEM_EQUITY account (postInstrumentCashOut's
+    // shape for a purchase) materializes value out of nowhere and must not count.
+    // An ADJUSTMENT between two real, tracked accounts (fx.service.ts's shape for
+    // a currency conversion) is genuine money movement and must still count.
+    const equity = await pool.query<{id:string}>(
+      `SELECT id FROM accounts WHERE book_id=$1 AND is_system=true
+       AND account_type_id=(SELECT id FROM account_types WHERE book_id=$1 AND purpose='SYSTEM_EQUITY')`,
+      [bookId],
+    );
+    const equityId = equity.rows[0]!.id;
+    const brokerage = await pool.query<{id:string}>(
+      `INSERT INTO accounts(book_id,name,account_type_id,normal_balance,currency_code,is_system,allow_negative_balance)
+       VALUES($1,'Adj Piapiri',(SELECT id FROM account_types WHERE book_id=$1 AND name='Birikim'),'DEBIT','TRY',false,true) RETURNING id`,
+      [bookId],
+    );
+    const brokerageId = brokerage.rows[0]!.id;
+    const otherCash = await pool.query<{id:string}>(
+      `INSERT INTO accounts(book_id,name,account_type_id,normal_balance,currency_code,is_system,allow_negative_balance)
+       VALUES($1,'Adj Cash',(SELECT id FROM account_types WHERE book_id=$1 AND name='Nakit'),'DEBIT','TRY',false,true) RETURNING id`,
+      [bookId],
+    );
+    const otherCashId = otherCash.rows[0]!.id;
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      // Equity-funded: buying an investment lot's cost leg.
+      const purchase = await client.query<{id:string}>(
+        `INSERT INTO transactions(book_id,transaction_type,account_id,target_account_id,title,transaction_date,status,currency_code,client_operation_id,created_by)
+         VALUES($1,'ADJUSTMENT',$2,$3,'Birikim alımı: Test Enstrümanı','2026-07-05T09:00:00.000Z','POSTED','TRY',gen_random_uuid(),$4) RETURNING id`,
+        [bookId,equityId,brokerageId,userId],
+      );
+      await client.query(
+        `INSERT INTO transaction_entries(transaction_id,account_id,direction,amount,currency_code,base_amount)
+         VALUES($1,$2,'DEBIT',5000,'TRY',5000),($1,$3,'CREDIT',5000,'TRY',5000)`,
+        [purchase.rows[0]!.id,equityId,brokerageId],
+      );
+      // Real ADJUSTMENT: a currency conversion between two tracked accounts.
+      const conversion = await client.query<{id:string}>(
+        `INSERT INTO transactions(book_id,transaction_type,account_id,target_account_id,title,transaction_date,status,currency_code,client_operation_id,created_by)
+         VALUES($1,'ADJUSTMENT',$2,$3,'Döviz alımı','2026-07-06T09:00:00.000Z','POSTED','TRY',gen_random_uuid(),$4) RETURNING id`,
+        [bookId,otherCashId,brokerageId,userId],
+      );
+      await client.query(
+        `INSERT INTO transaction_entries(transaction_id,account_id,direction,amount,currency_code,base_amount)
+         VALUES($1,$2,'DEBIT',600,'TRY',600),($1,$3,'CREDIT',600,'TRY',600)`,
+        [conversion.rows[0]!.id,otherCashId,brokerageId],
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    const report = await loadReportAnalytics(pool,{
+      bookId,from:"2026-07-01T00:00:00.000Z",to:"2026-07-31T23:59:59.999Z",
+      accountIds:[brokerageId,otherCashId],includeAllAccounts:false,granularity:"month",
+    });
+
+    const events = report.liquidity.events;
+    expect(events.some((event) => event.title==="Birikim alımı: Test Enstrümanı")).toBe(false);
+    // Both accounts on the conversion are in scope, so both legs must show up
+    // as their own row (+600 into brokerage, -600 out of cash) - summing them
+    // into one row nets to 0 and would silently drop the transfer entirely,
+    // which is the exact bug this test guards against.
+    const conversionImpacts = events.filter((event) => event.title==="Döviz alımı").map((event) => Number(event.impact)).sort((a,b) => a-b);
+    expect(conversionImpacts).toEqual([-600,600]);
+    // Net effect across both tracked accounts is 0 (money just moved between
+    // them) - and the equity-funded 5000 purchase must not appear at all.
+    expect(Number(report.liquidity.items.at(-1)?.projectedBalance)).toBe(0);
   });
 
   it("does not let a reversed transaction's later-dated reversal show up as phantom movement in either bucket",async()=>{

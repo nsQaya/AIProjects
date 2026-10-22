@@ -2,7 +2,6 @@ import { useMemo, useState, type CSSProperties } from "react";
 import type {
   IncomeExpenseCostCenterItemDTO,
   IncomeExpenseReportItemDTO,
-  ReportAnalyticsResponse,
 } from "@defterx/contracts";
 
 import { ReportChart } from "../../components/charts";
@@ -32,27 +31,30 @@ import {
   reportDate,
   reportPeriodMeta,
 } from "./report-export";
+import { REPORT_KEYS, type ReportKey, type ReportSectionState } from "./useReportSections";
 
 export type ReportCategoryItem = Pick<
   IncomeExpenseReportItemDTO,
   "amount" | "id" | "isActive" | "name" | "type"
 >;
 
+const emptySection: ReportSectionState = { analytics: null, range: {}, busy: false, failed: false };
+export const defaultReportSections = Object.fromEntries(
+  REPORT_KEYS.map((key) => [key, emptySection]),
+) as Record<ReportKey, ReportSectionState>;
+
 export interface ReportsPageProps {
   accounts?: readonly AccountView[];
-  analytics?: ReportAnalyticsResponse | null;
   busy?: boolean;
   /** Geçiş döneminde eski rapor çağrılarının görünümünü korur. */
   costCenters?: readonly IncomeExpenseCostCenterItemDTO[];
   /** Geçiş döneminde eski rapor çağrılarının görünümünü korur. */
   items?: readonly ReportCategoryItem[];
-  loadFailed?: boolean;
-  onFilterChange?: (filter: ReportRange) => Promise<unknown>;
+  /** Each report tab keeps its own {range, analytics, busy, failed}; see useReportSections. */
+  sections?: Record<ReportKey, ReportSectionState>;
+  onApply?: (key: ReportKey, filter: ReportRange) => Promise<unknown>;
   onNotify?: (message: string) => void;
-  range?: ReportRange;
 }
-
-type ReportKey = "trend" | "balances" | "categories" | "liquidity" | "netWorth";
 
 const liquidityTypeLabels: Record<string, string> = {
   INCOME: "Gelir",
@@ -80,22 +82,23 @@ function sum(values: readonly string[]): number {
 
 export function ReportsPage({
   accounts = [],
-  analytics = null,
   busy = false,
   costCenters = [],
   items = [],
-  loadFailed = false,
-  onFilterChange = () => Promise.resolve(),
+  sections = defaultReportSections,
+  onApply = () => Promise.resolve(),
   onNotify = () => {},
-  range = {},
 }: ReportsPageProps) {
   const [active, setActive] = useState<ReportKey>("trend");
   const [detailCategoryId, setDetailCategoryId] = useState("");
   const [detailCostCenterId, setDetailCostCenterId] = useState("");
 
+  const activeSection = sections[active];
+  const categoriesAnalytics = sections.categories.analytics;
+
   const analyticsCategories = useMemo(() => {
     const grouped = new Map<string, ReportCategoryItem>();
-    for (const row of analytics?.categoryDetail.breakdown ?? []) {
+    for (const row of categoriesAnalytics?.categoryDetail.breakdown ?? []) {
       const current = grouped.get(row.categoryId);
       grouped.set(row.categoryId, {
         id: row.categoryId,
@@ -106,8 +109,8 @@ export function ReportsPage({
       });
     }
     return [...grouped.values()];
-  }, [analytics]);
-  const categoryItems = analytics ? analyticsCategories : items;
+  }, [categoriesAnalytics]);
+  const categoryItems = categoriesAnalytics ? analyticsCategories : items;
   const expenseRows = categoryItems
     .filter((item) => item.type === "EXPENSE" && Number(item.amount) > 0)
     .map((item) => ({ ...item, amount: Number(item.amount) }))
@@ -120,7 +123,7 @@ export function ReportsPage({
 
   const analyticsCostCenters = useMemo(() => {
     const grouped = new Map<string, { amount: number; id: string; isActive: boolean; name: string }>();
-    for (const row of analytics?.categoryDetail.breakdown ?? []) {
+    for (const row of categoriesAnalytics?.categoryDetail.breakdown ?? []) {
       if (!row.costCenterId || !row.costCenterName || row.categoryType !== "EXPENSE") continue;
       const current = grouped.get(row.costCenterId);
       grouped.set(row.costCenterId, {
@@ -131,34 +134,35 @@ export function ReportsPage({
       });
     }
     return [...grouped.values()];
-  }, [analytics]);
-  const costCenterRows = analytics
+  }, [categoriesAnalytics]);
+  const costCenterRows = categoriesAnalytics
     ? analyticsCostCenters.sort((left, right) => right.amount - left.amount)
     : costCenters
       .filter((item) => Number(item.amount) < 0)
       .map((item) => ({ ...item, amount: -Number(item.amount) }))
       .sort((left, right) => right.amount - left.amount);
   const totalCostCenterExpense = costCenterRows.reduce((total, item) => total + item.amount, 0);
-  const detailTransactions = (analytics?.categoryDetail.transactions ?? []).filter((transaction) =>
+  const detailTransactions = (categoriesAnalytics?.categoryDetail.transactions ?? []).filter((transaction) =>
     (!detailCategoryId || transaction.categoryId === detailCategoryId)
     && (!detailCostCenterId || transaction.costCenterId === detailCostCenterId));
 
+  const netWorthAnalytics = sections.netWorth.analytics;
   const netWorthTree = useMemo(
-    () => (analytics ? netWorthBreakdown(analytics.netWorth) : { nodes: [], charted: 0, debt: 0 }),
-    [analytics],
+    () => (netWorthAnalytics ? netWorthBreakdown(netWorthAnalytics.netWorth) : { nodes: [], charted: 0, debt: 0 }),
+    [netWorthAnalytics],
   );
 
-  const exportMeta = useMemo(() => {
-    if (!analytics) return [];
-    const selected = range.accountIds;
+  const exportMetaFor = (section: ReportSectionState) => {
+    if (!section.analytics) return [];
+    const selected = section.range.accountIds;
     const accountSummary = !selected || selected.length >= accounts.length
       ? "Tüm hesaplar"
       : `${selected.length} hesap: ${accounts
           .filter((account) => selected.includes(account.id))
           .map((account) => account.name)
           .join(", ")}`;
-    return reportPeriodMeta(analytics.from, analytics.to, accountSummary);
-  }, [accounts, analytics, range.accountIds]);
+    return reportPeriodMeta(section.analytics.from, section.analytics.to, accountSummary);
+  };
 
   const exportActions = (table: ExportTable, filenameBase: string) => ({
     onExcel: () => exportTableToExcel(table, `${filenameBase}-${today()}`),
@@ -174,8 +178,6 @@ export function ReportsPage({
 
   return (
     <section className="page-section reports-workspace">
-      <ReportFilters accounts={accounts} busy={busy} value={range} onApply={onFilterChange} />
-
       <nav className="report-tabs" aria-label="Raporlar">
         {tabs.map((tab) => (
           <button key={tab.key} type="button" className={active === tab.key ? "active" : ""}
@@ -185,46 +187,65 @@ export function ReportsPage({
         ))}
       </nav>
 
-      {!analytics && items.length === 0 && costCenters.length === 0 ? (
+      <ReportFilters
+        key={active}
+        accounts={accounts}
+        busy={busy || activeSection.busy}
+        value={activeSection.range}
+        onApply={(filter) => onApply(active, filter)}
+      />
+
+      {!activeSection.analytics && (active !== "categories" || (items.length === 0 && costCenters.length === 0)) ? (
         <article className="panel empty-state">
-          {loadFailed
+          {activeSection.failed
             ? "Rapor verileri yüklenemedi. Filtreleri kontrol edip Raporu uygula ile yeniden deneyin."
             : "Rapor verileri hazırlanıyor."}
         </article>
       ) : null}
 
-      {active === "trend" && analytics ? (
+      {active === "trend" && sections.trend.analytics ? (
         <>
-          <div className="report-metrics">
-            <article><span>Gelir</span><strong>{money(sum(analytics.trend.map((item) => item.income)))}</strong></article>
-            <article><span>Gider</span><strong>{money(sum(analytics.trend.map((item) => item.expense)))}</strong></article>
-            <article><span>Net</span><strong>{money(sum(analytics.trend.map((item) => item.net)))}</strong></article>
-            <article><span>Dönem sonu bakiye</span><strong>{money(Number(analytics.trend.at(-1)?.balance ?? 0))}</strong></article>
-          </div>
-          <article className="panel report-main-panel">
-            <header className="panel-head"><div><h2>Gelir–Gider–Net Trendi</h2><p>Dönemsel hareket ve seçili hesapların birleşik bakiyesi</p></div></header>
-            <ReportChart busy={busy} height={390} label="Gelir gider net trendi" option={trendOption(analytics.trend)} />
-          </article>
+          {(() => {
+            const analytics = sections.trend.analytics;
+            return (
+              <>
+                <div className="report-metrics">
+                  <article><span>Gelir</span><strong>{money(sum(analytics.trend.map((item) => item.income)))}</strong></article>
+                  <article><span>Gider</span><strong>{money(sum(analytics.trend.map((item) => item.expense)))}</strong></article>
+                  <article><span>Net</span><strong>{money(sum(analytics.trend.map((item) => item.net)))}</strong></article>
+                  <article><span>Dönem sonu bakiye</span><strong>{money(Number(analytics.trend.at(-1)?.balance ?? 0))}</strong></article>
+                </div>
+                <article className="panel report-main-panel">
+                  <header className="panel-head"><div><h2>Gelir–Gider–Net Trendi</h2><p>Dönemsel hareket ve seçili hesapların birleşik bakiyesi</p></div></header>
+                  <ReportChart busy={busy} height={390} label="Gelir gider net trendi" option={trendOption(analytics.trend)} />
+                </article>
+              </>
+            );
+          })()}
         </>
       ) : null}
 
-      {active === "balances" && analytics ? (
-        <article className="panel report-main-panel">
-          <header className="panel-head">
-            <div><h2>Hesap Bakiyesi Gelişimi</h2><p>Her hesabın dönem sonu bakiyesi ayrı çizgide gösterilir</p></div>
-            {analytics.accountBalances.accounts.length > 0 ? (
-              <ExportMenu {...exportActions(accountBalancesTable(analytics.accountBalances, exportMeta), "defterx-hesap-bakiyeleri")} />
-            ) : null}
-          </header>
-          <ReportChart busy={busy} height={410} label="Hesap bakiyesi gelişimi" option={accountBalanceOption(analytics.accountBalances)} />
-          <div className="report-table-wrap"><table className="report-table"><thead><tr><th>Hesap</th><th>Son bakiye</th></tr></thead><tbody>
-            {analytics.accountBalances.accounts.map((account) => {
-              const latest = analytics.accountBalances.items.filter((item) => item.accountId === account.id).at(-1);
-              return <tr key={account.id}><td>{account.name}</td><td>{money(Number(latest?.balance ?? 0))}</td></tr>;
-            })}
-          </tbody></table></div>
-        </article>
-      ) : null}
+      {active === "balances" && sections.balances.analytics ? (() => {
+        const analytics = sections.balances.analytics;
+        const exportMeta = exportMetaFor(sections.balances);
+        return (
+          <article className="panel report-main-panel">
+            <header className="panel-head">
+              <div><h2>Hesap Bakiyesi Gelişimi</h2><p>Her hesabın dönem sonu bakiyesi ayrı çizgide gösterilir</p></div>
+              {analytics.accountBalances.accounts.length > 0 ? (
+                <ExportMenu {...exportActions(accountBalancesTable(analytics.accountBalances, exportMeta), "defterx-hesap-bakiyeleri")} />
+              ) : null}
+            </header>
+            <ReportChart busy={busy} height={410} label="Hesap bakiyesi gelişimi" option={accountBalanceOption(analytics.accountBalances)} />
+            <div className="report-table-wrap"><table className="report-table"><thead><tr><th>Hesap</th><th>Son bakiye</th></tr></thead><tbody>
+              {analytics.accountBalances.accounts.map((account) => {
+                const latest = analytics.accountBalances.items.filter((item) => item.accountId === account.id).at(-1);
+                return <tr key={account.id}><td>{account.name}</td><td>{money(Number(latest?.balance ?? 0))}</td></tr>;
+              })}
+            </tbody></table></div>
+          </article>
+        );
+      })() : null}
 
       {active === "categories" ? (
         <>
@@ -266,12 +287,12 @@ export function ReportsPage({
               ))}
             </div>
           </article>
-          {analytics ? (
+          {categoriesAnalytics ? (
             <article className="panel report-detail-panel">
               <header className="panel-head">
                 <div><h2>Kategori → Masraf Merkezi → İşlem</h2><p>Bir kırılım seçerek kaynak işlemlere inin</p></div>
                 {detailTransactions.length > 0 ? (
-                  <ExportMenu {...exportActions(categoryDetailTable(detailTransactions, exportMeta), "defterx-kategori-detayi")} />
+                  <ExportMenu {...exportActions(categoryDetailTable(detailTransactions, exportMetaFor(sections.categories)), "defterx-kategori-detayi")} />
                 ) : null}
               </header>
               <div className="report-drill-filters">
@@ -309,32 +330,42 @@ export function ReportsPage({
         </>
       ) : null}
 
-      {active === "liquidity" && analytics ? (
-        <>
-          <div className="report-metrics">
-            <article><span>Başlangıç bakiyesi</span><strong>{money(Number(analytics.liquidity.openingBalance))}</strong></article>
-            <article><span>Giriş</span><strong>{money(sum(analytics.liquidity.items.map((item) => item.inflow)))}</strong></article>
-            <article><span>Çıkış</span><strong>{money(sum(analytics.liquidity.items.map((item) => item.outflow)))}</strong></article>
-            <article><span>Tahmini dönem sonu</span><strong>{money(Number(analytics.liquidity.items.at(-1)?.projectedBalance ?? analytics.liquidity.openingBalance))}</strong></article>
-          </div>
-          <article className="panel report-main-panel">
-            <header className="panel-head">
-              <div><h2>Likidite ve Nakit Tahmini</h2><p>Başlangıç bakiyesi, gerçekleşen işlemler ve bekleyen planlı işlemlerin birleşik projeksiyonu</p></div>
-              {analytics.liquidity.events.length > 0 ? (
-                <ExportMenu {...exportActions(liquidityEventsTable(analytics.liquidity, exportMeta), "defterx-likidite-planlar")} />
-              ) : null}
-            </header>
-            <ReportChart busy={busy} height={390} label="Likidite ve nakit tahmini" option={liquidityOption(analytics.liquidity.items)} />
-            <div className="report-table-wrap"><table className="report-table"><thead><tr><th>Tarih</th><th>İşlem</th><th>Tür</th><th>Durum</th><th>Etki</th></tr></thead><tbody>
-              {analytics.liquidity.events.map((event) => <tr key={event.id}><td>{reportDate(event.scheduledAt)}</td><td>{event.title}</td><td>{liquidityTypeLabels[event.type] ?? event.type}</td><td>{event.realized ? "Gerçekleşen" : "Planlı"}</td><td className={Number(event.impact) >= 0 ? "positive" : "negative"}>{money(Number(event.impact))}</td></tr>)}
-              {analytics.liquidity.events.length === 0 ? <tr><td colSpan={5}>Seçilen tarihlerde işlem yok.</td></tr> : null}
-            </tbody></table></div>
-          </article>
-        </>
-      ) : null}
+      {active === "liquidity" && sections.liquidity.analytics ? (() => {
+        const analytics = sections.liquidity.analytics;
+        const exportMeta = exportMetaFor(sections.liquidity);
+        return (
+          <>
+            <div className="report-metrics">
+              <article><span>Başlangıç bakiyesi</span><strong>{money(Number(analytics.liquidity.openingBalance))}</strong></article>
+              <article><span>Giriş</span><strong>{money(sum(analytics.liquidity.items.map((item) => item.inflow)))}</strong></article>
+              <article><span>Çıkış</span><strong>{money(sum(analytics.liquidity.items.map((item) => item.outflow)))}</strong></article>
+              <article><span>Tahmini dönem sonu</span><strong>{money(Number(analytics.liquidity.items.at(-1)?.projectedBalance ?? analytics.liquidity.openingBalance))}</strong></article>
+            </div>
+            <article className="panel report-main-panel">
+              <header className="panel-head">
+                <div><h2>Likidite ve Nakit Tahmini</h2><p>Başlangıç bakiyesi, gerçekleşen işlemler ve bekleyen planlı işlemlerin birleşik projeksiyonu</p></div>
+                {analytics.liquidity.events.length > 0 ? (
+                  <ExportMenu {...exportActions(liquidityEventsTable(analytics.liquidity, exportMeta), "defterx-likidite-planlar")} />
+                ) : null}
+              </header>
+              <ReportChart busy={busy} height={390} label="Likidite ve nakit tahmini" option={liquidityOption(analytics.liquidity.items)} />
+              <div className="report-table-wrap"><table className="report-table"><thead><tr><th>Tarih</th><th>İşlem</th><th>Tür</th><th>Durum</th><th>Etki</th></tr></thead><tbody>
+                {analytics.liquidity.events.map((event, index) => (
+                  // A transfer between two selected accounts contributes two rows sharing the same id (one per leg).
+                  <tr key={`${event.id}-${index}`}><td>{reportDate(event.scheduledAt)}</td><td>{event.title}</td><td>{liquidityTypeLabels[event.type] ?? event.type}</td><td>{event.realized ? "Gerçekleşen" : "Planlı"}</td><td className={Number(event.impact) >= 0 ? "positive" : "negative"}>{money(Number(event.impact))}</td></tr>
+                ))}
+                {analytics.liquidity.events.length === 0 ? <tr><td colSpan={5}>Seçilen tarihlerde işlem yok.</td></tr> : null}
+              </tbody></table></div>
+            </article>
+          </>
+        );
+      })() : null}
 
-      {active === "netWorth" && analytics ? (
-        <>
+      {active === "netWorth" && sections.netWorth.analytics ? (() => {
+        const analytics = sections.netWorth.analytics;
+        const exportMeta = exportMetaFor(sections.netWorth);
+        return (
+          <>
           <div className="report-metrics">
             <article><span>Toplam varlık</span><strong>{money(Number(analytics.netWorth.totalAssets))}</strong></article>
             <article><span>Yatırım maliyeti</span><strong>{money(Number(analytics.netWorth.investmentCost))}</strong></article>
@@ -419,8 +450,9 @@ export function ReportsPage({
                 ) : null}
               </tbody></table></div>
             </article>
-        </>
-      ) : null}
+          </>
+        );
+      })() : null}
     </section>
   );
 }

@@ -22,6 +22,7 @@ import type {
 interface AccountDialogProps {
   account: AccountViewModel | null;
   accountTypes: readonly AccountTypeDTO[];
+  accounts: readonly AccountViewModel[];
   currencies: readonly CurrencyDTO[];
   onClose: () => void;
   onCreate: (values: CreateAccountValues) => AccountMutation;
@@ -49,9 +50,30 @@ function nonNegativeMoney(value: string, label: string): MoneyString {
   return normalized.startsWith("+") ? normalized.slice(1) : normalized;
 }
 
+function optionalDayOfMonth(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = Number(trimmed);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 28) {
+    throw new Error("Hesap kesim günü 1-28 arasında bir gün olmalı.");
+  }
+  return parsed;
+}
+
+function optionalNonNegativeInt(value: string, label: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = Number(trimmed);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error(`${label} negatif olmayan bir tam sayı olmalı.`);
+  }
+  return parsed;
+}
+
 export function AccountDialog({
   account,
   accountTypes,
+  accounts,
   currencies,
   onClose,
   onCreate,
@@ -59,6 +81,9 @@ export function AccountDialog({
 }: AccountDialogProps) {
   const editing = account !== null;
   const currencyOptions = currencies.filter((option) => option.isEnabled);
+  const fundingAccountOptions = accounts.filter(
+    (option) => option.id !== account?.id && !option.isArchived,
+  );
   const [accountTypeId, setAccountTypeId] = useState(
     account?.accountTypeId ?? accountTypes[0]?.id ?? "",
   );
@@ -69,6 +94,15 @@ export function AccountDialog({
     account?.allowNegativeBalance ?? false,
   );
   const [creditLimit, setCreditLimit] = useState(amountInputValue(account?.creditLimit ?? null));
+  const [statementDay, setStatementDay] = useState(
+    account?.statementDay != null ? String(account.statementDay) : "",
+  );
+  const [paymentDueOffsetDays, setPaymentDueOffsetDays] = useState(
+    account?.paymentDueOffsetDays != null ? String(account.paymentDueOffsetDays) : "",
+  );
+  const [defaultFundingAccountId, setDefaultFundingAccountId] = useState(
+    account?.defaultFundingAccountId ?? "",
+  );
   const [feedback, setFeedback] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -77,12 +111,22 @@ export function AccountDialog({
     const allowsNegative = type?.defaultAllowNegativeBalance ?? false;
     setAccountTypeId(value);
     setAllowNegativeBalance(allowsNegative);
-    if (!allowsNegative) setCreditLimit("");
+    if (!allowsNegative) {
+      setCreditLimit("");
+      setStatementDay("");
+      setPaymentDueOffsetDays("");
+      setDefaultFundingAccountId("");
+    }
   };
 
   const handleNegativeBalanceChange = (allowed: boolean) => {
     setAllowNegativeBalance(allowed);
-    if (!allowed) setCreditLimit("");
+    if (!allowed) {
+      setCreditLimit("");
+      setStatementDay("");
+      setPaymentDueOffsetDays("");
+      setDefaultFundingAccountId("");
+    }
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -105,11 +149,22 @@ export function AccountDialog({
       const normalizedLimit = submittedAllowNegative && submittedCreditLimit.trim()
         ? nonNegativeMoney(submittedCreditLimit, "Eksi bakiye / kredi limiti")
         : null;
+      const normalizedStatementDay = submittedAllowNegative ? optionalDayOfMonth(read("statementDay")) : null;
+      const normalizedPaymentDueOffsetDays = submittedAllowNegative
+        ? optionalNonNegativeInt(read("paymentDueOffsetDays"), "Son ödeme günü")
+        : null;
+      if (normalizedPaymentDueOffsetDays != null && normalizedStatementDay == null) {
+        throw new Error("Son ödeme günü girildiyse hesap kesim günü de girilmeli.");
+      }
+      const submittedFundingAccountId = submittedAllowNegative ? read("defaultFundingAccountId") : "";
       const values = {
         name: trimmedName,
         accountTypeId: submittedAccountTypeId,
         allowNegativeBalance: submittedAllowNegative,
         creditLimit: normalizedLimit,
+        statementDay: normalizedStatementDay,
+        paymentDueOffsetDays: normalizedPaymentDueOffsetDays,
+        defaultFundingAccountId: submittedFundingAccountId || null,
       } satisfies AccountFormValues;
 
       const submittedOpeningBalance = nonNegativeMoney(read("openingBalance"), "Açılış bakiyesi");
@@ -241,6 +296,51 @@ export function AccountDialog({
               value={creditLimit}
               onChange={(event) => setCreditLimit(event.currentTarget.value)}
             />
+          </label>
+
+          <label id="statement-day-field" hidden={!allowNegativeBalance}>
+            <span>Hesap kesim günü</span>
+            <input
+              disabled={!allowNegativeBalance}
+              inputMode="numeric"
+              max={28}
+              min={1}
+              name="statementDay"
+              placeholder="Örn. 10 (kredi kartıysa)"
+              type="number"
+              value={statementDay}
+              onChange={(event) => setStatementDay(event.currentTarget.value)}
+            />
+          </label>
+
+          <label id="payment-due-offset-field" hidden={!allowNegativeBalance}>
+            <span>Son ödeme günü (kesimden kaç gün sonra)</span>
+            <input
+              disabled={!allowNegativeBalance}
+              inputMode="numeric"
+              min={0}
+              name="paymentDueOffsetDays"
+              placeholder="Örn. 10"
+              type="number"
+              value={paymentDueOffsetDays}
+              onChange={(event) => setPaymentDueOffsetDays(event.currentTarget.value)}
+            />
+          </label>
+
+          <label className="full-field" id="default-funding-account-field" hidden={!allowNegativeBalance}>
+            <span>Ödeme hesabı</span>
+            <SearchableSelect
+              name="defaultFundingAccountId"
+              value={defaultFundingAccountId}
+              onChange={setDefaultFundingAccountId}
+              disabled={!allowNegativeBalance}
+              placeholder="Taksitlerin varsayılan ödeneceği hesap (isteğe bağlı)"
+              options={fundingAccountOptions.map((option) => ({
+                value: option.id,
+                label: option.name,
+              }))}
+            />
+            <small>Kredi kartıysa, taksitli harcama girerken ödeme hesabı olarak otomatik seçili gelir.</small>
           </label>
         </div>
 

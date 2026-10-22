@@ -1,8 +1,11 @@
+import { Money } from "@defterx/shared";
+import { sha256 } from "../../common/crypto";
 import { AppError } from "../../common/errors";
 import { inTransaction, type DbClient } from "../../infrastructure/database";
-import type { CreateScheduledInput, UpdateScheduledInput } from "./scheduled.schemas";
+import type { CreateInstallmentExpenseInput, CreateScheduledInput, UpdateScheduledInput } from "./scheduled.schemas";
 import { createTransactionWithClient } from "../transactions/transaction.service";
 import { advanceRecurrence, type Frequency } from "../recurring-transactions/recurrence";
+import { computeInstallmentDueDates } from "./installment-schedule";
 
 const projection = `id,book_id AS "bookId",account_id AS "accountId",target_account_id AS "targetAccountId",
   transaction_type AS "transactionType",category_id AS "categoryId",
@@ -64,6 +67,115 @@ export async function createScheduled(client: DbClient, userId: string, input: C
       await audit(transaction,input.bookId,userId,result.rows[0].id,"CREATE",result.rows[0]);
     }
     return {...created[0],createdCount:created.length};
+  });
+}
+
+/**
+ * Posts the full purchase against the card today (so its limit/debt reflects
+ * reality immediately and the expense lands in its category now), then plans
+ * one scheduled TRANSFER per installment - from the funding account to the
+ * card - dated to that card's real statement cycle. Each plan pays down the
+ * card's debt only when realized later; nothing about the purchase's own
+ * accrual is duplicated by them. Assumes `client` already has an open
+ * transaction (see `createInstallmentExpense` for the idempotency-checked entry point).
+ */
+async function createInstallmentExpenseWithClient(client: DbClient, userId: string, input: CreateInstallmentExpenseInput) {
+  const card = await client.query<{ currency_code: string; statement_day: number | null; payment_due_offset_days: number | null }>(
+    `SELECT currency_code,statement_day,payment_due_offset_days FROM accounts
+     WHERE id=$1 AND book_id=$2 AND deleted_at IS NULL AND is_archived=false`,
+    [input.accountId, input.bookId],
+  );
+  const cardAccount = card.rows[0];
+  if (!cardAccount) throw new AppError(422, "ACCOUNT_UNAVAILABLE", "Account is unavailable or belongs to another book");
+  if (cardAccount.statement_day == null || cardAccount.payment_due_offset_days == null) {
+    throw new AppError(422, "STATEMENT_CYCLE_NOT_CONFIGURED", "This account has no statement day configured for installments");
+  }
+  const funding = await client.query<{ currency_code: string }>(
+    `SELECT currency_code FROM accounts WHERE id=$1 AND book_id=$2 AND deleted_at IS NULL AND is_archived=false`,
+    [input.fundingAccountId, input.bookId],
+  );
+  const fundingAccount = funding.rows[0];
+  if (!fundingAccount) throw new AppError(422, "ACCOUNT_UNAVAILABLE", "Funding account is unavailable or belongs to another book");
+  if (fundingAccount.currency_code !== input.currencyCode || cardAccount.currency_code !== input.currencyCode) {
+    throw new AppError(422, "CURRENCY_MISMATCH", "Installment accounts must share the transaction currency");
+  }
+
+  const posted = await createTransactionWithClient(client, userId, {
+    bookId: input.bookId,
+    type: "EXPENSE",
+    title: input.title,
+    amount: input.amount,
+    currencyCode: input.currencyCode,
+    accountId: input.accountId,
+    categoryId: input.categoryId,
+    ...(input.costCenterId ? { costCenterId: input.costCenterId } : {}),
+    transactionDate: input.transactionDate,
+    clientOperationId: input.clientOperationId,
+    description: `${input.installmentCount} taksit halinde kart harcaması`,
+  });
+
+  const shares = Money.parse(input.amount).divideEvenly(input.installmentCount);
+  const dueDates = computeInstallmentDueDates(
+    new Date(input.transactionDate),
+    cardAccount.statement_day,
+    cardAccount.payment_due_offset_days,
+    input.installmentCount,
+  );
+
+  const scheduledTransactions = [];
+  for (let index = 0; index < input.installmentCount; index += 1) {
+    const result = await client.query(
+      `INSERT INTO scheduled_transactions(
+         book_id,account_id,target_account_id,transaction_type,title,amount,currency_code,scheduled_at,origin_transaction_id
+       ) VALUES($1,$2,$3,'TRANSFER',$4,$5,$6,$7,$8) RETURNING ${projection}`,
+      [
+        input.bookId, input.fundingAccountId, input.accountId,
+        `${input.title} (taksit ${index + 1}/${input.installmentCount})`,
+        shares[index]!.toString(), input.currencyCode, dueDates[index]!.toISOString(), posted.id,
+      ],
+    );
+    scheduledTransactions.push(result.rows[0]);
+    await audit(client, input.bookId, userId, result.rows[0].id, "CREATE", result.rows[0]);
+  }
+
+  return { transaction: posted, scheduledTransactions };
+}
+
+type InstallmentExpenseResult = Awaited<ReturnType<typeof createInstallmentExpenseWithClient>>;
+
+/** Idempotency-checked entry point, matching `createTransaction`'s pattern. */
+export async function createInstallmentExpense(pool: DbClient, userId: string, input: CreateInstallmentExpenseInput, idempotencyKey?: string): Promise<InstallmentExpenseResult> {
+  return inTransaction(pool, async (client) => {
+    const requestHash = await sha256(JSON.stringify(input));
+    let ownsKey = false;
+    if (idempotencyKey) {
+      if (idempotencyKey.length > 200) throw new AppError(422,"INVALID_IDEMPOTENCY_KEY","Idempotency-Key is too long");
+      const inserted = await client.query(
+        `INSERT INTO idempotency_keys(user_id,key,request_hash,locked_until,expires_at)
+         VALUES($1,$2,$3,now()+interval '30 seconds',now()+interval '24 hours')
+         ON CONFLICT DO NOTHING RETURNING id`,
+        [userId,idempotencyKey,requestHash],
+      );
+      ownsKey = Boolean(inserted.rowCount);
+      if (!ownsKey) {
+        const existing = await client.query<{request_hash:string;response_body:unknown}>(
+          `SELECT request_hash,response_body FROM idempotency_keys WHERE user_id=$1 AND key=$2 FOR UPDATE`,
+          [userId,idempotencyKey],
+        );
+        const key = existing.rows[0]!;
+        if (key.request_hash !== requestHash) throw new AppError(409,"IDEMPOTENCY_KEY_REUSED","Idempotency-Key was used with another payload");
+        if (key.response_body) return key.response_body as InstallmentExpenseResult;
+        throw new AppError(409,"REQUEST_IN_PROGRESS","A request with this key is still being processed");
+      }
+    }
+    const result = await createInstallmentExpenseWithClient(client,userId,input);
+    if (idempotencyKey && ownsKey) {
+      await client.query(
+        `UPDATE idempotency_keys SET status_code=201,response_body=$3 WHERE user_id=$1 AND key=$2`,
+        [userId,idempotencyKey,JSON.stringify(result)],
+      );
+    }
+    return result;
   });
 }
 

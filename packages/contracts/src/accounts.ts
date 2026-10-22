@@ -2,6 +2,7 @@ import type {
   CurrencyCode,
   DeletedEntityResponse,
   Direction,
+  ISODateTimeString,
   ItemListResponse,
   MoneyString,
   UUID,
@@ -87,6 +88,12 @@ export interface AccountDTO {
   currencyCode: CurrencyCode;
   allowNegativeBalance: boolean;
   creditLimit: MoneyString | null;
+  /** Statement (kesim) day of month (1-28); null/absent when this account doesn't track a billing cycle. */
+  statementDay?: number | null;
+  /** Days from the statement day to the payment due date; null/absent unless statementDay is set. */
+  paymentDueOffsetDays?: number | null;
+  /** The account that installment payments default to (e.g. a card's checking account); user-settable, never required. */
+  defaultFundingAccountId?: UUID | null;
   isArchived: boolean;
   sortOrder: number;
   version: Version;
@@ -117,6 +124,9 @@ export interface CreateAccountRequest {
   currencyCode: CurrencyCode;
   allowNegativeBalance?: boolean;
   creditLimit?: MoneyString | null;
+  statementDay?: number | null;
+  paymentDueOffsetDays?: number | null;
+  defaultFundingAccountId?: UUID | null;
   openingBalance?: MoneyString;
   isArchived?: boolean;
   sortOrder?: number;
@@ -127,6 +137,9 @@ export interface UpdateAccountRequest {
   accountTypeId?: UUID;
   allowNegativeBalance?: boolean;
   creditLimit?: MoneyString | null;
+  statementDay?: number | null;
+  paymentDueOffsetDays?: number | null;
+  defaultFundingAccountId?: UUID | null;
   /** New opening-balance magnitude in the account's own currency. When it differs from the current one, the live opening posting is reversed and re-posted. "0" removes it. */
   openingBalance?: MoneyString;
   isArchived?: boolean;
@@ -144,3 +157,32 @@ export interface ArchivedAccountResponse {
 }
 
 export type DeleteAccountResponse = DeletedEntityResponse | ArchivedAccountResponse;
+
+export interface AccountStatementItemDTO {
+  id: UUID;
+  /** PURCHASE: a one-shot EXPENSE already posted. INSTALLMENT: a scheduled share of an installment plan due this period. */
+  kind: "PURCHASE" | "INSTALLMENT";
+  title: string;
+  /** What actually happened: the posted amount for a PURCHASE, or (for an INSTALLMENT) the amount it was realized for once COMPLETED, otherwise its planned share. */
+  amount: MoneyString;
+  /** INSTALLMENT only, present only when a partial payment made `amount` differ from the plan's original share. */
+  plannedAmount?: MoneyString;
+  /** transactionDate for a PURCHASE, scheduledAt (the due date) for an INSTALLMENT. */
+  date: ISODateTimeString;
+  status: "POSTED" | "PENDING" | "OVERDUE" | "COMPLETED";
+}
+
+export interface AccountStatementResponse {
+  accountId: UUID;
+  /** The statement's closing (kesim) date. */
+  closingDate: ISODateTimeString;
+  /** closingDate + the account's paymentDueOffsetDays. */
+  dueDate: ISODateTimeString;
+  items: AccountStatementItemDTO[];
+  total: MoneyString;
+}
+
+export interface GetAccountStatementQuery {
+  /** Closing month, "YYYY-MM"; omitted defaults to the next upcoming statement. */
+  period?: string;
+}

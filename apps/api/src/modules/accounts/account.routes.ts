@@ -6,7 +6,7 @@ import { assertAccountAccess } from "../../middleware/account-access";
 import { requireBookRole } from "../../middleware/book-access";
 import type { DbClient } from "../../infrastructure/database";
 import { createAccountSchema, updateAccountSchema } from "./account.schemas";
-import { createAccount, deleteOrArchiveAccount, getAccountBalance, listAccounts, updateAccount } from "./account.service";
+import { createAccount, deleteOrArchiveAccount, getAccountBalance, getAccountStatement, listAccounts, updateAccount } from "./account.service";
 import { shareAccountSchema, updateAccountShareSchema } from "./account-share.schemas";
 import {
   accountPostingContext,
@@ -52,6 +52,13 @@ accountRoutes.get("/:accountId/balance", async (c) => {
   const accountId = c.req.param("accountId");
   await assertAccountAccess(client, accountId, c.get("user").id, "VIEW");
   return c.json(await getAccountBalance(client, accountId));
+});
+
+accountRoutes.get("/:accountId/statement", async (c) => {
+  const client = c.get("database");
+  const accountId = c.req.param("accountId");
+  await assertAccountAccess(client, accountId, c.get("user").id, "VIEW");
+  return c.json(await getAccountStatement(client, accountId, c.req.query("period")));
 });
 
 accountRoutes.delete("/:accountId", async (c) => {

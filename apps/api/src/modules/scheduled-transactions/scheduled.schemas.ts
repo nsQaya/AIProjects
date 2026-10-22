@@ -62,5 +62,22 @@ export const realizeScheduledSchema = z.object({
   amount: money.optional()
 });
 
+export const createInstallmentExpenseSchema = z.object({
+  bookId: uuid,
+  accountId: uuid,
+  fundingAccountId: uuid,
+  categoryId: uuid,
+  costCenterId: uuid.nullable().optional(),
+  title: z.string().trim().min(1).max(200),
+  amount: money,
+  currencyCode: currency,
+  transactionDate: isoDate,
+  installmentCount: z.number().int().min(2).max(36),
+  clientOperationId: uuid,
+}).superRefine((value,context)=>{
+  if(value.fundingAccountId===value.accountId)context.addIssue({code:"custom",path:["fundingAccountId"],message:"Funding account must differ from the card account"});
+});
+
 export type CreateScheduledInput = z.infer<typeof createScheduledSchema>;
 export type UpdateScheduledInput = z.infer<typeof updateScheduledSchema>;
+export type CreateInstallmentExpenseInput = z.infer<typeof createInstallmentExpenseSchema>;
